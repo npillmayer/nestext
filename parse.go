@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -26,8 +27,9 @@ const (
 	ErrCodeIO     = 10  // will wrap an underlying I/O error
 	ErrCodeSchema = 100 // schema violation; may wrap an underlying error
 	// all NestedText format errors have code >= ErrCodeFormat
-	ErrCodeFormat        = 200 + iota // NestedText format error
-	ErrCodeFormatNoInput              // NestedText format error: no input present
+	ErrCodeFormat               = 200 + iota // NestedText format error
+	ErrCodeFormatNoInput                     // NestedText format error: no input present
+	ErrCodeFormatToplevelIndent              // NestedText format error: top-level item was indented
 )
 
 // Error produces an error message from a NestedText error.
@@ -40,7 +42,7 @@ func (e NestedTextError) Unwrap() error {
 	return e.wrappedError
 }
 
-// ---------------------------------------------------------------------------
+// --- Enums -----------------------------------------------------------------
 
 type ParserTokenType int8
 
@@ -60,28 +62,35 @@ const (
 	multiKey
 )
 
-type parserTag struct {
-	LineNo    int
-	ColNo     int
-	TokenType ParserTokenType
-	Indent    int
-	Content   string
-	Error     error
-}
-
-// --- Document buffer -------------------------------------------------------
+// --- Input text buffer -----------------------------------------------------
 
 // lineBuffer is an abstraction of a NestedText document source.
+// The scanner will use a lineBuffer for input.
 type lineBuffer struct {
-	Lookahead  rune
-	ByteCursor int64
-	Cursor     int64
-	Input      *bufio.Scanner
-	Line       strings.Reader
-	isEof      bool
+	Lookahead   rune           // the next UTF-8 character
+	Cursor      int64          // position of lookahead in character count
+	ByteCursor  int64          // position of lookahead in byte count
+	CurrentLine int            // current line number, starting at 1 (= next "expected line")
+	Input       *bufio.Scanner // we use this to break up input into lines
+	Text        string         // holds a copy of Input
+	Line        strings.Reader // reader on Text
+	isEof       bool           // is this buffer done reading?
+	LastError   error          // last error, if any (except EOF errors)
 }
 
 const eolMarker = '\n'
+
+var errAtEof error = errors.New("EOF")
+
+func newLineBuffer(inputDoc io.Reader) *lineBuffer {
+	input := bufio.NewScanner(inputDoc)
+	buf := &lineBuffer{Input: input}
+	err := buf.AdvanceLine()
+	if err != errAtEof {
+		buf.LastError = err
+	}
+	return buf
+}
 
 func (buf *lineBuffer) AdvanceCursor() error {
 	if buf.isEof {
@@ -109,30 +118,108 @@ func (buf *lineBuffer) readRune() (rune, error) {
 	return r, nil
 }
 
-// AdvanceLine will advance the input buffer to the next line.
-// Will return atEof if EOF has been encountered.
-// Lookahead will be set to first rune of line, or `eolMarker` in the case of an empty line.
+// AdvanceLine will advance the input buffer to the next line. Will return atEof if EOF has been
+// encountered.
+//
+// Blank lines and comment lines are skipped. This may be a somewhat questionable decision in terms
+// of separation of concerns, as empty lines and comments are artifacts for which the scanner should
+// take care of. However, it makes implemeting the scanner rules much more convenient
+//
+// Lookahead will be set to first rune (UFT-8 character) of the resulting current line.
+// Line-count and cursor are updated.
+//
 func (buf *lineBuffer) AdvanceLine() error {
-	if buf.isEof {
-		return errAtEof
-	}
 	buf.Cursor = 0
 	buf.ByteCursor = 0
-	if !buf.Input.Scan() {
-		if err := buf.Input.Err(); err != nil {
-			return wrapError(ErrCodeIO, "I/O error while reading input", err)
+	// iterate over the lines of the input document until valid line found or EOF
+	for !buf.isEof {
+		buf.CurrentLine++
+		if !buf.Input.Scan() { // could not read a new line: either I/O-error or EOF
+			if err := buf.Input.Err(); err != nil {
+				return wrapError(ErrCodeIO, "I/O error while reading input", err)
+			}
+			buf.isEof = true
+			buf.Line = *strings.NewReader("")
+			return errAtEof
 		}
-		buf.isEof = true
-		buf.Line = *strings.NewReader("")
-		return nil
+		buf.Text = buf.Input.Text()
+		if buf.IsIgnoredLine() {
+			continue
+		}
 	}
-	buf.Line = *strings.NewReader(buf.Input.Text())
+	buf.Line = *strings.NewReader(buf.Text)
 	return buf.AdvanceCursor()
 }
 
-var errAtEof error = errors.New("EOF")
+var blankPattern *regexp.Regexp
+var commentPattern *regexp.Regexp
+
+// IsIgnoredLine is a predicate for the current line of input. From the spec:
+// Blank lines are lines that are empty or consist only of white space characters (spaces or tabs).
+// Comments are lines that have # as the first non-white-space character on the line.
+func (buf *lineBuffer) IsIgnoredLine() bool {
+	if blankPattern == nil {
+		blankPattern = regexp.MustCompile(`^\s*$`)
+		commentPattern = regexp.MustCompile(`^\s*#`)
+	}
+	if blankPattern.MatchString(buf.Text) || commentPattern.MatchString(buf.Text) {
+		return true
+	}
+	return false
+}
+
+// The scanner has to match UTF-8 characters (runes) from the input. Matching is done using
+// predicate functions (instead of direct comparison).
+//
+// singleRune returns a predicate to match a single rune
+func singleRune(r rune) func(rune) bool {
+	return func(arg rune) bool {
+		return arg == r
+	}
+}
+
+// anyRuneOf retuns a predicate to match a single rune out of a set of runes.
+func anyRuneOf(runes ...rune) func(rune) bool {
+	return func(arg rune) bool {
+		for _, r := range runes {
+			if arg == r {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func (buf *lineBuffer) match(predicate func(rune) bool) bool {
+	if buf.isEof || buf.LastError != nil {
+		return false
+	}
+	if !predicate(buf.Lookahead) {
+		return false
+	}
+	var err error
+	if buf.Lookahead == eolMarker {
+		err = buf.AdvanceLine()
+	} else {
+		err = buf.AdvanceCursor()
+	}
+	if err != errAtEof {
+		buf.LastError = err
+		return false
+	}
+	return true
+}
 
 // --- Scanner ---------------------------------------------------------------
+
+type parserTag struct {
+	LineNo    int
+	ColNo     int
+	TokenType ParserTokenType
+	Indent    int
+	Content   string
+	Error     error
+}
 
 type scanner struct {
 	Buf       *lineBuffer
@@ -149,16 +236,7 @@ func newScanner(inputReader io.Reader) (*scanner, error) {
 	if inputReader == nil {
 		return nil, makeNestedTextError(nil, ErrCodeFormatNoInput, "no input present")
 	}
-	input := bufio.NewScanner(inputReader)
-	buf := &lineBuffer{
-		Input: input,
-	}
-	if !buf.Input.Scan() {
-		if err := buf.Input.Err(); err != nil {
-			return nil, wrapError(ErrCodeIO, "cannot read input", err)
-		}
-		buf.isEof = true // empty input is a valid NestedText document
-	}
+	buf := newLineBuffer(inputReader)
 	return &scanner{Buf: buf, Step: scanFileStart}, nil
 }
 
@@ -182,19 +260,19 @@ func (sc *scanner) NextToken() *parserTag {
 //      -> other: docRoot
 //
 func scanFileStart(tag *parserTag, input *lineBuffer) (*parserTag, scannerStep, *lineBuffer) {
+	tag.TokenType = emptyDocument
 	if input == nil {
-		return &parserTag{TokenType: emptyDocument}, nil, nil
+		tag.Error = makeNestedTextError(tag, ErrCodeFormatNoInput, "no valid input document")
+		return tag, nil, input
 	}
-	// skip empty lines and comments at start of document
-	for input.Lookahead == '#' || input.Lookahead == eolMarker {
-		if err := input.AdvanceLine(); err != nil {
-			return &parserTag{TokenType: emptyDocument, Error: err}, nil, input
-		}
-		if input.isEof {
-			return &parserTag{TokenType: emptyDocument}, nil, input
-		}
+	if input.isEof {
+		return tag, nil, input
 	}
 	tag.TokenType = docRoot
+	scanIndent(tag, input)
+	if tag.Indent > 0 {
+		tag.Error = makeNestedTextError(tag, ErrCodeFormatToplevelIndent, "top-level item must not be indented")
+	}
 	return tag, nil, input
 }
 
@@ -202,15 +280,17 @@ func scanItem(tag *parserTag, input *lineBuffer) (*parserTag, scannerStep, *line
 	return scanIndent(tag, input)
 }
 
+// scanIndent scans intentation at the start of a line of input. From the spec:
+// Leading spaces on a line represents indentation. Only ASCII spaces are allowed in the indentation.
+// Specifically, tabs and the various Unicode spaces are not allowed.
 func scanIndent(tag *parserTag, input *lineBuffer) (*parserTag, scannerStep, *lineBuffer) {
-	matched, err := match(' ', input)
-	for matched && err == nil {
+	matched := input.match(singleRune(' '))
+	for matched && input.LastError == nil {
 		tag.Indent++
-		matched, err = match(' ', input)
+		matched = input.match(singleRune(' '))
 	}
-	if err != nil {
-		tag.Error = err
-		return tag, nil, input
+	if input.LastError != nil {
+		tag.Error = input.LastError
 	}
 	return tag, nil, input
 }
@@ -231,22 +311,4 @@ func wrapError(code int, errMsg string, err error) *NestedTextError {
 	e := makeNestedTextError(nil, code, errMsg)
 	e.wrappedError = err
 	return e
-}
-
-// TODO make this a member of lineBuffer
-// TODO make variadic list of LA options (alternatives)
-func match(lookahead rune, input *lineBuffer) (bool, error) {
-	if input.isEof {
-		return false, nil
-	}
-	if lookahead != input.Lookahead {
-		return false, nil
-	}
-	var err error
-	if input.Lookahead == eolMarker {
-		err = input.AdvanceLine()
-	} else {
-		err = input.AdvanceCursor()
-	}
-	return true, err
 }
