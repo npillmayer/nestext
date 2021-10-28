@@ -35,8 +35,8 @@ type scanner struct {
 //
 type scannerStep func(*parserToken) (*parserToken, scannerStep)
 
-// NewScanner creates a scanner for an input reader.
-func NewScanner(inputReader io.Reader) (*scanner, error) {
+// newScanner creates a scanner for an input reader.
+func newScanner(inputReader io.Reader) (*scanner, error) {
 	if inputReader == nil {
 		return nil, makeNestedTextError(nil, ErrCodeFormatNoInput, "no input present")
 	}
@@ -194,9 +194,44 @@ func (sc *scanner) recognizeInlineItem(toktype parserTokenType, token *parserTok
 // --- Inline scanner --------------------------------------------------------
 
 type inlineScanner struct {
-	Input  string
-	Cursor int64
-	State  int
+	Input      strings.Reader
+	ByteCursor int64
+	Cursor     int64
+	Lookahead  inlineTokenType
+	State      int
+}
+
+func newInlineScanner(line string) *inlineScanner {
+	isc := &inlineScanner{
+		Input: *strings.NewReader(line),
+	}
+	return isc
+}
+
+var inlineTokenMap = map[rune]inlineTokenType{
+	'\n': newline,
+	',':  comma,
+	':':  colon,
+	'[':  listOpen,
+	']':  listClose,
+	'{':  dictOpen,
+	'}':  dictClose,
+}
+
+type state int8
+
+const e state = -1
+
+var inlineStateMachine = [][]state{
+	{e, e, -1, -1, 7, e, 1, e},
+	{2, e, e, 3, 7, e, 1, e},
+}
+
+func (isc *inlineScanner) TokenFor(r rune) inlineTokenType {
+	if t, ok := inlineTokenMap[r]; ok {
+		return t
+	}
+	return character
 }
 
 // --- Helpers ---------------------------------------------------------------

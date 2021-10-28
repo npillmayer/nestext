@@ -87,9 +87,9 @@ type parserToken struct {
 	Error         error           // error condition, if any
 }
 
+//go:generate stringer -type=parserTokenType
 type parserTokenType int8
 
-//go:generate stringer -type=parserTokenType
 const (
 	undefined parserTokenType = iota
 	eof
@@ -118,3 +118,19 @@ func (token *parserToken) String() string {
 	return fmt.Sprintf("tag[at(%d,%d) ind=%d type=%s %#v]", token.LineNo, token.ColNo, token.Indent,
 		token.TokenType, token.Content)
 }
+
+// --- Inline token type -----------------------------------------------------
+
+//go:generate stringer -type=inlineTokenType
+type inlineTokenType int8
+
+const (
+	character inlineTokenType = iota
+	newline
+	comma
+	colon
+	listOpen
+	listClose
+	dictOpen
+	dictClose
+)

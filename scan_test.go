@@ -25,7 +25,7 @@ func TestLineBufferRemainder(t *testing.T) {
 
 func TestScannerCreate(t *testing.T) {
 	r := strings.NewReader("")
-	_, err := NewScanner(r)
+	_, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestScannerCreate(t *testing.T) {
 
 func TestScannerStart(t *testing.T) {
 	r := strings.NewReader("# This is a comment to skip\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestScannerStart(t *testing.T) {
 
 func TestScannerTopLevelIndent(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n   debug: false\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestScannerTopLevelIndent(t *testing.T) {
 
 func TestScannerListItem(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n- debug\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestScannerListItem(t *testing.T) {
 
 func TestScannerListItemIllegal(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n-debug\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestScannerListItemIllegal(t *testing.T) {
 
 func TestScannerLongListItem(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n-\n > debug\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestScannerLongListItem(t *testing.T) {
 
 func TestScannerMultilineString(t *testing.T) {
 	r := strings.NewReader("> Hello\n> World!\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestScannerMultilineString(t *testing.T) {
 
 func TestScannerMultilineKey(t *testing.T) {
 	r := strings.NewReader(": Hello\n  : Key\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestScannerMultilineKey(t *testing.T) {
 
 func TestScannerInlineError(t *testing.T) {
 	r := strings.NewReader("[ hello, world }")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestScannerInlineError(t *testing.T) {
 
 func TestScannerInlineDictKeyValue(t *testing.T) {
 	r := strings.NewReader("Hello  : World!\n")
-	sc, err := NewScanner(r)
+	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +174,12 @@ func TestScannerInlineDictKeyValue(t *testing.T) {
 	if tok.TokenType != inlineDictKeyValue {
 		t.Errorf("item expected to be of type inline key-value; is: %s", tok.TokenType)
 	}
+}
+
+// ---------------------------------------------------------------------------
+
+func TestInlineScanner1(t *testing.T) {
+	_ = newInlineScanner("[]")
 }
 
 // ---------------------------------------------------------------------------
