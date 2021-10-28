@@ -18,11 +18,13 @@ func _() {
 	_ = x[dictKeyMultiline-7]
 	_ = x[inlineList-8]
 	_ = x[inlineDict-9]
+	_ = x[inlineDictKeyValue-10]
+	_ = x[inlineDictKey-11]
 }
 
-const _parserTokenType_name = "undefinedeofemptyDocumentdocRootlistItemlistItemMultilinestringMultilinedictKeyMultilineinlineListinlineDict"
+const _parserTokenType_name = "undefinedeofemptyDocumentdocRootlistItemlistItemMultilinestringMultilinedictKeyMultilineinlineListinlineDictinlineDictKeyValueinlineDictKey"
 
-var _parserTokenType_index = [...]uint8{0, 9, 12, 25, 32, 40, 57, 72, 88, 98, 108}
+var _parserTokenType_index = [...]uint8{0, 9, 12, 25, 32, 40, 57, 72, 88, 98, 108, 126, 139}
 
 func (i parserTokenType) String() string {
 	if i < 0 || i >= parserTokenType(len(_parserTokenType_index)-1) {

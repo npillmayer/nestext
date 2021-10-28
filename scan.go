@@ -1,202 +1,42 @@
 package nestext
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 )
 
-// TODO: set new ScanLines function which will break on 'CR' without following 'LF'
+// TODO: set new ScanLines function which will break on 'CR' without following 'LF' (see spec)
 
-// --- Input text buffer -----------------------------------------------------
-
-// lineBuffer is an abstraction of a NestedText document source.
-// The scanner will use a lineBuffer for input.
-type lineBuffer struct {
-	Lookahead   rune           // the next UTF-8 character
-	Cursor      int64          // position of lookahead in character count
-	ByteCursor  int64          // position of lookahead in byte count
-	CurrentLine int            // current line number, starting at 1 (= next "expected line")
-	Input       *bufio.Scanner // we use this to break up input into lines
-	Text        string         // holds a copy of Input
-	Line        strings.Reader // reader on Text
-	isEof       bool           // is this buffer done reading?
-	LastError   error          // last error, if any (except EOF errors)
-}
-
-const eolMarker = '\n'
-
-var errAtEof error = errors.New("EOF")
-
-func newLineBuffer(inputDoc io.Reader) *lineBuffer {
-	input := bufio.NewScanner(inputDoc)
-	buf := &lineBuffer{Input: input}
-	err := buf.AdvanceLine()
-	if err != errAtEof {
-		buf.LastError = err
-	}
-	return buf
-}
-
-func (buf *lineBuffer) IsEof() bool {
-	return buf.isEof && buf.ByteCursor >= buf.Line.Size()
-}
-
-func (buf *lineBuffer) AdvanceCursor() error {
-	if buf.isEof {
-		return errAtEof
-	}
-	if buf.ByteCursor >= buf.Line.Size() { // at end of line, set lookahead to eolMarker
-		buf.Lookahead = eolMarker
-	} else {
-		r, err := buf.readRune()
-		if err != nil {
-			return err
-		}
-		buf.Lookahead = r
-	}
-	return nil
-}
-
-func (buf *lineBuffer) readRune() (rune, error) {
-	r, runeLen, readerErr := buf.Line.ReadRune()
-	if readerErr != nil {
-		return 0, wrapError(ErrCodeIO, "I/O error while reading input character", readerErr)
-	}
-	buf.ByteCursor += int64(runeLen)
-	buf.Cursor++
-	return r, nil
-}
-
-// AdvanceLine will advance the input buffer to the next line. Will return atEof if EOF has been
-// encountered.
+// We will be using two different scanners:
 //
-// Blank lines and comment lines are skipped. This may be a somewhat questionable decision in terms
-// of separation of concerns, as empty lines and comments are artifacts for which the scanner should
-// take care of. However, it makes implemeting the scanner rules much more convenient
+// - a line-level scanner, concerned with recognizing lines of input as tokens.
+//   These are to be consumed by a parser for the overall NestedText-grammar
+// - an inline-scanner, concerned with recognizing words from inline-items' content.
+//   These will be used to parse inline-items like "{ key1:value1, key2:value2 }"
+
+// --- Line level scanner ----------------------------------------------------
+
+// scanner is a type for a line-level scanner.
 //
-// Lookahead will be set to first rune (UFT-8 character) of the resulting current line.
-// Line-count and cursor are updated.
+// Our line-level scanner will operate by calling scanning steps in a chain, iteratively.
+// Each step function tests for valid lookahead and then possibly branches out to a
+// subsequent step function. Step functions may consume input characters ("match(…)").
 //
-func (buf *lineBuffer) AdvanceLine() error {
-	buf.Cursor = 0
-	buf.ByteCursor = 0
-	// iterate over the lines of the input document until valid line found or EOF
-	for !buf.isEof {
-		buf.CurrentLine++
-		fmt.Printf("===> reading line #%d\n", buf.CurrentLine)
-		if !buf.Input.Scan() { // could not read a new line: either I/O-error or EOF
-			if err := buf.Input.Err(); err != nil {
-				return wrapError(ErrCodeIO, "I/O error while reading input", err)
-			}
-			fmt.Println("===> EOF !")
-			buf.isEof = true
-			buf.Line = *strings.NewReader("")
-			return errAtEof
-		}
-		buf.Text = buf.Input.Text()
-		if !buf.IsIgnoredLine() {
-			buf.Line = *strings.NewReader(buf.Text)
-			break
-		}
-	}
-	buf.Line = *strings.NewReader(buf.Text)
-	return buf.AdvanceCursor()
-}
-
-var blankPattern *regexp.Regexp
-var commentPattern *regexp.Regexp
-
-// IsIgnoredLine is a predicate for the current line of input. From the spec:
-// Blank lines are lines that are empty or consist only of white space characters (spaces or tabs).
-// Comments are lines that have # as the first non-white-space character on the line.
-func (buf *lineBuffer) IsIgnoredLine() bool {
-	if blankPattern == nil {
-		blankPattern = regexp.MustCompile(`^\s*$`)
-		commentPattern = regexp.MustCompile(`^\s*#`)
-	}
-	if blankPattern.MatchString(buf.Text) || commentPattern.MatchString(buf.Text) {
-		return true
-	}
-	return false
-}
-
-// ReadRemainder returns the remainder of the current line of input text.
-// This is a frequent operation for NestedText items.
-func (buf *lineBuffer) ReadLineRemainder() string {
-	var s string
-	if buf.IsEof() {
-		s = ""
-	} else if buf.ByteCursor == buf.Line.Size() {
-		s = string(buf.Lookahead)
-	} else if buf.ByteCursor > buf.Line.Size() {
-		s = ""
-	} else {
-		s = string(buf.Lookahead) + buf.Text[buf.ByteCursor:buf.Line.Size()]
-	}
-	buf.LastError = buf.AdvanceLine()
-	return s
-}
-
-// The scanner has to match UTF-8 characters (runes) from the input. Matching is done using
-// predicate functions (instead of direct comparison).
-//
-// singleRune returns a predicate to match a single rune
-func singleRune(r rune) func(rune) bool {
-	return func(arg rune) bool {
-		return arg == r
-	}
-}
-
-// anyRuneOf retuns a predicate to match a single rune out of a set of runes.
-func anyRuneOf(runes ...rune) func(rune) bool {
-	return func(arg rune) bool {
-		for _, r := range runes {
-			if arg == r {
-				return true
-			}
-		}
-		return false
-	}
-}
-
-func (buf *lineBuffer) match(predicate func(rune) bool) bool {
-	if buf.IsEof() || buf.LastError != nil {
-		return false
-	}
-	if !predicate(buf.Lookahead) {
-		return false
-	}
-	var err error
-	if buf.Lookahead == eolMarker {
-		err = buf.AdvanceLine()
-	} else {
-		err = buf.AdvanceCursor()
-	}
-	if err != nil && err != errAtEof {
-		buf.LastError = err
-		return false
-	}
-	return true
-}
-
-// --- Scanner ---------------------------------------------------------------
-
 type scanner struct {
-	Buf       *lineBuffer
-	Step      scannerStep
-	LastError error
-	Levels    []int // stack of indents
+	Buf       *lineBuffer // line buffer abstracts away properties of input readers
+	Step      scannerStep // the next scanner step to execute in a chain
+	LastError error       // last error, if any
 }
 
 // We're buiding up a scanner from chains of scanner step functions.
+// Tokens may be modified by a step function.
+// A scanner step will return the next step in the chain, or nil to stop/accept.
+//
 type scannerStep func(*parserToken) (*parserToken, scannerStep)
 
-// newScanner creates a scanner for an input reader.
-func newScanner(inputReader io.Reader) (*scanner, error) {
+// NewScanner creates a scanner for an input reader.
+func NewScanner(inputReader io.Reader) (*scanner, error) {
 	if inputReader == nil {
 		return nil, makeNestedTextError(nil, ErrCodeFormatNoInput, "no input present")
 	}
@@ -206,8 +46,18 @@ func newScanner(inputReader io.Reader) (*scanner, error) {
 	return sc, nil
 }
 
+// NextToken will be called by the parser to receive the next line-level token. A token
+// subsumes the properties of a line of NestedText input (excluding inline-items such
+// as "{ key:val, key:val }" ).
+//
+// NextToken ususally will iterate over a chain of step functions until it reaches an
+// accepting state. Acceptance is signalled by getting a nil-step return value from a
+// step function, meaning there is no further step applicable in this chain.
+//
+// If a step function returns an error-signalling token, the chaining stops as well.
+//
 func (sc *scanner) NextToken() *parserToken {
-	token := &parserToken{LineNo: sc.Buf.CurrentLine, ColNo: int(sc.Buf.Cursor)}
+	token := newParserToken(sc.Buf.CurrentLine, int(sc.Buf.Cursor))
 	if sc.Step == nil {
 		sc.Step = sc.ScanItem
 	}
@@ -221,18 +71,8 @@ func (sc *scanner) NextToken() *parserToken {
 	return token
 }
 
-func (sc *scanner) fastPath(rule scannerStep, callback func(*parserToken)) *parserToken {
-	token := &parserToken{LineNo: sc.Buf.CurrentLine, ColNo: int(sc.Buf.Cursor)}
-	for rule != nil {
-		token, rule = rule(token)
-		if token.Error != nil {
-			break
-		}
-	}
-	return token
-}
-
-// scanFileStart matches a valid start of a NestedText document input.
+// ScanFileStart matches a valid start of a NestedText document input. This is always the
+// first step function to call.
 //
 //    file start:
 //      -> EOF:   emptyDocument
@@ -256,6 +96,7 @@ func (sc *scanner) ScanFileStart(token *parserToken) (*parserToken, scannerStep)
 	return token, nil
 }
 
+// StepItem is a step function to start recognizing a line-level item.
 func (sc *scanner) ScanItem(token *parserToken) (*parserToken, scannerStep) {
 	fmt.Println("---> ScanItem")
 	if sc.Buf.Lookahead == ' ' {
@@ -264,6 +105,7 @@ func (sc *scanner) ScanItem(token *parserToken) (*parserToken, scannerStep) {
 	return token, sc.ScanItemBody
 }
 
+// ScanIndentation is a step function to recognize the indentation part of an item.
 func (sc *scanner) ScanIndentation(token *parserToken) (*parserToken, scannerStep) {
 	if sc.Buf.Lookahead == ' ' {
 		sc.Buf.match(singleRune(' '))
@@ -273,6 +115,10 @@ func (sc *scanner) ScanIndentation(token *parserToken) (*parserToken, scannerSte
 	return token, sc.ScanItemBody
 }
 
+// ScanItemBody is a step function to recognize the main part of an item, starting at
+// the item's tag (e.g., ':', '>', etc.). The only exception are inline keys and inline key-value-pairs,
+// which start with the key's string.
+//
 func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) {
 	fmt.Printf("---> ScanItemBody, LA = '%#U'\n", sc.Buf.Lookahead)
 	switch sc.Buf.Lookahead {
@@ -297,12 +143,21 @@ func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) 
 	return token, sc.ScanInlineKey // 'epsilon-transition' to inline-key-value rules
 }
 
+// ScanInlineKey is a step function to recognize an inline key, optionally followed by an inline
+// value.
 func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep) {
-	switch sc.Buf.Lookahead {
+	switch sc.Buf.Lookahead { // consume characters; stop on ':' or EOL
 	case ':':
-		sc.Buf.match(singleRune(':'))
-	case eolMarker:
+		// remove trailing whitespace from key (=> Content[0])
+		key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-1]
+		token.Content = append(token.Content, strings.TrimSpace(key))
+		token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
+	case eolMarker: // Error: premature end of line
+		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
+			"dict key item not properly terminated by ':'")
 	default: // recognize everything as either part of the key or trailing whitespace
+		sc.Buf.match(anything())
+		return token, sc.ScanInlineKey
 	}
 	return token, nil
 }
@@ -312,7 +167,7 @@ func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, tok
 	if sc.Buf.Lookahead == ' ' {
 		sc.Buf.match(singleRune(' '))
 		token.TokenType = single
-		token.Content = sc.Buf.ReadLineRemainder()
+		token.Content = append(token.Content, sc.Buf.ReadLineRemainder())
 		return token
 	}
 	if sc.Buf.Lookahead != eolMarker {
@@ -332,8 +187,16 @@ func (sc *scanner) recognizeInlineItem(toktype parserTokenType, token *parserTok
 			"inline-item does not match opening tag")
 	}
 	token.TokenType = toktype
-	token.Content = sc.Buf.ReadLineRemainder()
+	token.Content = append(token.Content, sc.Buf.ReadLineRemainder())
 	return token
+}
+
+// --- Inline scanner --------------------------------------------------------
+
+type inlineScanner struct {
+	Input  string
+	Cursor int64
+	State  int
 }
 
 // --- Helpers ---------------------------------------------------------------

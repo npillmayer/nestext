@@ -28,6 +28,15 @@
 // without the sometimes confusing details of interpretation.
 // NestedText does not interpret any data types (unlike YAML), nor does it impose a schema.
 // All of that has to be done by the application.
+//
+// Parsing NestedText
+//
+// (TODO)
+//
+// Example Application Usage
+//
+// (TODO)
+//
 package nestext
 
 import "fmt"
@@ -67,6 +76,17 @@ func (e NestedTextError) Unwrap() error {
 
 // --- Parser token type -----------------------------------------------------
 
+// parserToken is a type for communicating between the line-level scanner and the parser.
+// The scanner will read lines and wrap the content into parser tags, i.e., tokens for the
+// parser to perform its operations on.
+type parserToken struct {
+	LineNo, ColNo int             // start of the tag within the input source
+	TokenType     parserTokenType // type of token
+	Indent        int             // amount of indent of this line
+	Content       []string        // UTF-8 content of the line (without indent and item tag)
+	Error         error           // error condition, if any
+}
+
 type parserTokenType int8
 
 //go:generate stringer -type=parserTokenType
@@ -81,20 +101,20 @@ const (
 	dictKeyMultiline
 	inlineList
 	inlineDict
+	inlineDictKeyValue
+	inlineDictKey
 )
 
-// parserToken is a type for communicating between the scanner and the parser.
-// The scanner will read lines and wrap the content into parser tags, i.e., tokens for the
-// parser to perform its operations on.
-type parserToken struct {
-	LineNo, ColNo int             // start of the tag within the input source
-	TokenType     parserTokenType // type of token
-	Indent        int             // amount of indent of this line
-	Content       string          // UTF-8 content of the line (without indent and item tag)
-	Error         error           // error condition, if any
+// newParserToken creates a parser token initialized with line and column index.
+func newParserToken(line, col int) *parserToken {
+	return &parserToken{
+		LineNo:  line,
+		ColNo:   col,
+		Content: []string{},
+	}
 }
 
 func (token *parserToken) String() string {
-	return fmt.Sprintf("tag[at(%d,%d) ind=%d type=%s '%s']", token.LineNo, token.ColNo, token.Indent,
+	return fmt.Sprintf("tag[at(%d,%d) ind=%d type=%s %#v]", token.LineNo, token.ColNo, token.Indent,
 		token.TokenType, token.Content)
 }
