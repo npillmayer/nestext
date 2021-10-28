@@ -12,15 +12,17 @@ func _() {
 	_ = x[eof-1]
 	_ = x[emptyDocument-2]
 	_ = x[docRoot-3]
-	_ = x[listKey-4]
-	_ = x[listKeyMultiline-5]
+	_ = x[listItem-4]
+	_ = x[listItemMultiline-5]
 	_ = x[stringMultiline-6]
 	_ = x[dictKeyMultiline-7]
+	_ = x[inlineList-8]
+	_ = x[inlineDict-9]
 }
 
-const _parserTokenType_name = "undefinedeofemptyDocumentdocRootlistKeylistKeyMultilinestringMultilinedictKeyMultiline"
+const _parserTokenType_name = "undefinedeofemptyDocumentdocRootlistItemlistItemMultilinestringMultilinedictKeyMultilineinlineListinlineDict"
 
-var _parserTokenType_index = [...]uint8{0, 9, 12, 25, 32, 39, 55, 70, 86}
+var _parserTokenType_index = [...]uint8{0, 9, 12, 25, 32, 40, 57, 72, 88, 98, 108}
 
 func (i parserTokenType) String() string {
 	if i < 0 || i >= parserTokenType(len(_parserTokenType_index)-1) {

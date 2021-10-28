@@ -65,7 +65,7 @@ func (e NestedTextError) Unwrap() error {
 	return e.wrappedError
 }
 
-// --- Parser tag type -------------------------------------------------------
+// --- Parser token type -----------------------------------------------------
 
 type parserTokenType int8
 
@@ -75,16 +75,18 @@ const (
 	eof
 	emptyDocument
 	docRoot
-	listKey
-	listKeyMultiline
+	listItem
+	listItemMultiline
 	stringMultiline
 	dictKeyMultiline
+	inlineList
+	inlineDict
 )
 
-// parserTag is a type for communicating between the scanner and the parser.
+// parserToken is a type for communicating between the scanner and the parser.
 // The scanner will read lines and wrap the content into parser tags, i.e., tokens for the
 // parser to perform its operations on.
-type parserTag struct {
+type parserToken struct {
 	LineNo, ColNo int             // start of the tag within the input source
 	TokenType     parserTokenType // type of token
 	Indent        int             // amount of indent of this line
@@ -92,7 +94,7 @@ type parserTag struct {
 	Error         error           // error condition, if any
 }
 
-func (tag *parserTag) String() string {
-	return fmt.Sprintf("tag[(%d,%d) i=%d type=%s '%s']", tag.LineNo, tag.ColNo, tag.Indent, tag.TokenType,
-		tag.Content)
+func (token *parserToken) String() string {
+	return fmt.Sprintf("tag[at(%d,%d) ind=%d type=%s '%s']", token.LineNo, token.ColNo, token.Indent,
+		token.TokenType, token.Content)
 }

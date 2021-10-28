@@ -54,7 +54,7 @@ func TestScannerTopLevelIndent(t *testing.T) {
 	}
 }
 
-func TestScannerItem(t *testing.T) {
+func TestScannerListItem(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n- debug\n")
 	sc, err := newScanner(r)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestScannerItem(t *testing.T) {
 	}
 	tok = sc.NextToken()
 	t.Logf("token = %v", tok)
-	if tok.TokenType != listKey {
+	if tok.TokenType != listItem {
 		t.Errorf("item expected to be of type list item; is: %s", tok.TokenType)
 	}
 	if tok.Content != "debug" {
@@ -74,7 +74,7 @@ func TestScannerItem(t *testing.T) {
 	}
 }
 
-func TestScannerItemIllegal(t *testing.T) {
+func TestScannerListItemIllegal(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n-debug\n")
 	sc, err := newScanner(r)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestScannerItemIllegal(t *testing.T) {
 	}
 }
 
-func TestScannerLongItem(t *testing.T) {
+func TestScannerLongListItem(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n-\n > debug\n")
 	sc, err := newScanner(r)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestScannerLongItem(t *testing.T) {
 	}
 	tok = sc.NextToken()
 	logTag(tok, t)
-	if tok.TokenType != listKeyMultiline {
+	if tok.TokenType != listItemMultiline {
 		t.Errorf("item expected to be of type multiline list item; is: %s", tok.TokenType)
 	}
 }
@@ -127,7 +127,7 @@ func TestScannerMultilineString(t *testing.T) {
 }
 
 func TestScannerMultilineKey(t *testing.T) {
-	r := strings.NewReader(": Hello\n: World!\n")
+	r := strings.NewReader(": Hello\n  : Key\n")
 	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
@@ -145,9 +145,26 @@ func TestScannerMultilineKey(t *testing.T) {
 	}
 }
 
+func TestScannerInlineError(t *testing.T) {
+	r := strings.NewReader("[ hello, world }")
+	sc, err := newScanner(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.NextToken()        // doc root
+	tok := sc.NextToken() // inline list with errors
+	logTag(tok, t)
+	if tok.TokenType != inlineList {
+		t.Errorf("item expected to be of type inline list; is: %s", tok.TokenType)
+	}
+	if tok.Error == nil {
+		t.Errorf("expected inline item to carry an error, doesn't")
+	}
+}
+
 // ---------------------------------------------------------------------------
 
-func logTag(tag *parserTag, t *testing.T) {
+func logTag(tag *parserToken, t *testing.T) {
 	t.Logf("token = %v", tag)
 	if tag.Error != nil {
 		t.Logf("      + error: %v", tag.Error)

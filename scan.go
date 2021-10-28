@@ -193,7 +193,7 @@ type scanner struct {
 }
 
 // We're buiding up a scanner from chains of scanner step functions.
-type scannerStep func(*parserTag) (*parserTag, scannerStep)
+type scannerStep func(*parserToken) (*parserToken, scannerStep)
 
 // newScanner creates a scanner for an input reader.
 func newScanner(inputReader io.Reader) (*scanner, error) {
@@ -206,30 +206,30 @@ func newScanner(inputReader io.Reader) (*scanner, error) {
 	return sc, nil
 }
 
-func (sc *scanner) NextToken() *parserTag {
-	tag := &parserTag{LineNo: sc.Buf.CurrentLine, ColNo: int(sc.Buf.Cursor)}
+func (sc *scanner) NextToken() *parserToken {
+	token := &parserToken{LineNo: sc.Buf.CurrentLine, ColNo: int(sc.Buf.Cursor)}
 	if sc.Step == nil {
 		sc.Step = sc.ScanItem
 	}
 	for sc.Step != nil {
-		tag, sc.Step = sc.Step(tag)
-		if tag.Error != nil {
-			sc.LastError = tag.Error
+		token, sc.Step = sc.Step(token)
+		if token.Error != nil {
+			sc.LastError = token.Error
 			break
 		}
 	}
-	return tag
+	return token
 }
 
-func (sc *scanner) fastPath(rule scannerStep, callback func(*parserTag)) *parserTag {
-	tag := &parserTag{LineNo: sc.Buf.CurrentLine, ColNo: int(sc.Buf.Cursor)}
+func (sc *scanner) fastPath(rule scannerStep, callback func(*parserToken)) *parserToken {
+	token := &parserToken{LineNo: sc.Buf.CurrentLine, ColNo: int(sc.Buf.Cursor)}
 	for rule != nil {
-		tag, rule = rule(tag)
-		if tag.Error != nil {
+		token, rule = rule(token)
+		if token.Error != nil {
 			break
 		}
 	}
-	return tag
+	return token
 }
 
 // scanFileStart matches a valid start of a NestedText document input.
@@ -238,136 +238,114 @@ func (sc *scanner) fastPath(rule scannerStep, callback func(*parserTag)) *parser
 //      -> EOF:   emptyDocument
 //      -> other: docRoot
 //
-func (sc *scanner) ScanFileStart(tag *parserTag) (*parserTag, scannerStep) {
-	tag.TokenType = emptyDocument
+func (sc *scanner) ScanFileStart(token *parserToken) (*parserToken, scannerStep) {
+	token.TokenType = emptyDocument
 	if sc.Buf == nil {
-		tag.Error = makeNestedTextError(tag, ErrCodeFormatNoInput, "no valid input document")
-		return tag, nil
+		token.Error = makeNestedTextError(token, ErrCodeFormatNoInput, "no valid input document")
+		return token, nil
 	}
 	if sc.Buf.IsEof() {
-		return tag, nil
+		return token, nil
 	}
-	tag.TokenType = docRoot
-	tag.Indent = 0
+	token.TokenType = docRoot
+	token.Indent = 0
 	if sc.Buf.Lookahead == ' ' {
 		// From the spec: There is no indentation on the top-level object.
-		tag.Error = makeNestedTextError(tag, ErrCodeFormatToplevelIndent, "top-level item must not be indented")
+		token.Error = makeNestedTextError(token, ErrCodeFormatToplevelIndent, "top-level item must not be indented")
 	}
-	return tag, nil
+	return token, nil
 }
 
-func (sc *scanner) ScanItem(tag *parserTag) (*parserTag, scannerStep) {
+func (sc *scanner) ScanItem(token *parserToken) (*parserToken, scannerStep) {
 	fmt.Println("---> ScanItem")
 	if sc.Buf.Lookahead == ' ' {
-		return tag, sc.ScanIndentation
+		return token, sc.ScanIndentation
 	}
-	return tag, sc.ScanItemBody
+	return token, sc.ScanItemBody
 }
 
-func (sc *scanner) ScanIndentation(tag *parserTag) (*parserTag, scannerStep) {
+func (sc *scanner) ScanIndentation(token *parserToken) (*parserToken, scannerStep) {
 	if sc.Buf.Lookahead == ' ' {
 		sc.Buf.match(singleRune(' '))
-		tag.Indent++
-		return tag, sc.ScanIndentation
+		token.Indent++
+		return token, sc.ScanIndentation
 	}
-	return tag, sc.ScanItemBody
+	return token, sc.ScanItemBody
 }
 
-func (sc *scanner) ScanItemBody(tag *parserTag) (*parserTag, scannerStep) {
-	fmt.Printf("---> ScanItemBody, LA = '%#U'", sc.Buf.Lookahead)
+func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) {
+	fmt.Printf("---> ScanItemBody, LA = '%#U'\n", sc.Buf.Lookahead)
 	switch sc.Buf.Lookahead {
-	case '-': // list value, either single-line or multi-line
-		// From the spec:
+	case '-': // list value, either single-line or multi-line. From the spec:
 		// If the first non-space character on a line is a dash followed immediately by a space (-␣) or
 		// a line break, the line is a list item.
-		sc.Buf.match(singleRune('-'))
-		if sc.Buf.Lookahead == ' ' {
-			sc.Buf.match(singleRune(' '))
-			return tag, sc.ScanListItem
-		}
-		if sc.Buf.Lookahead != eolMarker {
-			tag.Error = makeNestedTextError(tag, ErrCodeFormatIllegalTag,
-				"list-item tag ('-') followed by illegal character")
-			return tag, nil
-		}
-		sc.Buf.match(singleRune(eolMarker))
-		tag.TokenType = listKeyMultiline
-		return tag, nil
-	case '>': // multi-line string
-		fmt.Println("---> multiline string")
-		// From the spec:
+		return sc.recognizeItemTag('-', listItem, listItemMultiline, token), nil
+	case '>': // multi-line string. From the spec:
 		// If the first non-space character on a line is a greater-than symbol followed immediately by
 		// a space (>␣) or a line break, the line is a string item.
-		sc.Buf.match(singleRune('>'))
-		if sc.Buf.Lookahead == ' ' {
-			sc.Buf.match(singleRune(' '))
-		} else if sc.Buf.Lookahead != eolMarker {
-			tag.Error = makeNestedTextError(tag, ErrCodeFormatIllegalTag,
-				"string tag ('>') followed by illegal character")
-			return tag, nil
-		}
-		tag.Content = sc.Buf.ReadLineRemainder()
-		tag.TokenType = stringMultiline
-		return tag, nil
-	case ':': // multi-line key
-		fmt.Println("---> multiline key")
-		// From the spec:
+		return sc.recognizeItemTag('>', stringMultiline, stringMultiline, token), nil
+	case ':': // multi-line key. From the spec:
 		// If the first non-space character on a line is a colon followed immediately by a space (:␣) or
 		// a line break, the line is a key item.
-		sc.Buf.match(singleRune(':'))
-		if sc.Buf.Lookahead == ' ' {
-			sc.Buf.match(singleRune(' '))
-		} else if sc.Buf.Lookahead != eolMarker {
-			tag.Error = makeNestedTextError(tag, ErrCodeFormatIllegalTag,
-				"key tag (':') followed by illegal character")
-			return tag, nil
-		}
-		tag.Content = sc.Buf.ReadLineRemainder()
-		tag.TokenType = dictKeyMultiline
-		return tag, nil
+		return sc.recognizeItemTag(':', dictKeyMultiline, dictKeyMultiline, token), nil
 	case '[': // single-line list
-		return tag, sc.ScanSingleLineList
+		return sc.recognizeInlineItem(inlineList, token), nil
 	case '{': // single-line dictionary
+		return sc.recognizeInlineItem(inlineDict, token), nil
 	default: // should be dictionary key
 	}
-	return tag, nil
+	return token, sc.ScanInlineKey // 'epsilon-transition' to inline-key-value rules
 }
 
-func (sc *scanner) ScanListItem(tag *parserTag) (*parserTag, scannerStep) {
-	fmt.Println("---> ScanListItem")
-	tag.TokenType = listKey
-	tag.Content = sc.Buf.ReadLineRemainder()
-	return tag, nil
-}
-
-func (sc *scanner) ScanSingleLineList(tag *parserTag) (*parserTag, scannerStep) {
-	return tag, nil
-}
-
-// ScanIndent scans intentation at the start of a line of input. From the spec:
-// Leading spaces on a line represents indentation. Only ASCII spaces are allowed in the indentation.
-// Specifically, tabs and the various Unicode spaces are not allowed.
-func (sc *scanner) ScanIndent(tag *parserTag) (*parserTag, scannerStep) {
-	fmt.Printf("===> scanIndent('%s')\n", sc.Buf.Text)
-	matched := sc.Buf.match(singleRune(' '))
-	for matched && sc.Buf.LastError == nil {
-		tag.Indent++
-		matched = sc.Buf.match(singleRune(' '))
+func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep) {
+	switch sc.Buf.Lookahead {
+	case ':':
+		sc.Buf.match(singleRune(':'))
+	case eolMarker:
+	default: // recognize everything as either part of the key or trailing whitespace
 	}
-	if sc.Buf.LastError != nil {
-		tag.Error = sc.Buf.LastError
-	}
-	return tag, nil
+	return token, nil
 }
 
-func makeNestedTextError(tag *parserTag, code int, errMsg string) *NestedTextError {
+func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, token *parserToken) *parserToken {
+	sc.Buf.match(singleRune(tag))
+	if sc.Buf.Lookahead == ' ' {
+		sc.Buf.match(singleRune(' '))
+		token.TokenType = single
+		token.Content = sc.Buf.ReadLineRemainder()
+		return token
+	}
+	if sc.Buf.Lookahead != eolMarker {
+		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
+			fmt.Sprintf("item tag %q followed by illegal character %#U", tag, sc.Buf.Lookahead))
+		return token
+	}
+	sc.Buf.match(singleRune(eolMarker))
+	token.TokenType = multi
+	return token
+}
+
+func (sc *scanner) recognizeInlineItem(toktype parserTokenType, token *parserToken) *parserToken {
+	closing := sc.Buf.Text[len(sc.Buf.Text)-1]
+	if rune(closing) != sc.Buf.Lookahead {
+		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
+			"inline-item does not match opening tag")
+	}
+	token.TokenType = toktype
+	token.Content = sc.Buf.ReadLineRemainder()
+	return token
+}
+
+// --- Helpers ---------------------------------------------------------------
+
+func makeNestedTextError(token *parserToken, code int, errMsg string) *NestedTextError {
 	err := &NestedTextError{
 		Code: code,
 		msg:  errMsg,
 	}
-	if tag != nil {
-		err.Line = tag.LineNo
-		err.Column = tag.ColNo
+	if token != nil {
+		err.Line = token.LineNo
+		err.Column = token.ColNo
 	}
 	return err
 }
