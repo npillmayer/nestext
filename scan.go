@@ -208,32 +208,6 @@ func newInlineScanner(line string) *inlineScanner {
 	return isc
 }
 
-var inlineTokenMap = map[rune]inlineTokenType{
-	'\n': newline,
-	',':  comma,
-	':':  colon,
-	'[':  listOpen,
-	']':  listClose,
-	'{':  dictOpen,
-	'}':  dictClose,
-}
-
-type state int8
-
-const e state = -1
-
-var inlineStateMachine = [][]state{
-	{e, e, -1, -1, 7, e, 1, e},
-	{2, e, e, 3, 7, e, 1, e},
-}
-
-func (isc *inlineScanner) TokenFor(r rune) inlineTokenType {
-	if t, ok := inlineTokenMap[r]; ok {
-		return t
-	}
-	return character
-}
-
 // --- Helpers ---------------------------------------------------------------
 
 func makeNestedTextError(token *parserToken, code int, errMsg string) *NestedTextError {

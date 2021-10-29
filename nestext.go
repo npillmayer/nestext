@@ -134,3 +134,20 @@ const (
 	dictOpen
 	dictClose
 )
+
+var inlineTokenMap = map[rune]inlineTokenType{
+	'\n': newline,
+	',':  comma,
+	':':  colon,
+	'[':  listOpen,
+	']':  listClose,
+	'{':  dictOpen,
+	'}':  dictClose,
+}
+
+func inlineTokenFor(r rune) inlineTokenType {
+	if t, ok := inlineTokenMap[r]; ok {
+		return t
+	}
+	return character
+}
