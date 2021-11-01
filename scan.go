@@ -210,8 +210,8 @@ func newInlineScanner(line string) *inlineScanner {
 
 // --- Helpers ---------------------------------------------------------------
 
-func makeNestedTextError(token *parserToken, code int, errMsg string) *NestedTextError {
-	err := &NestedTextError{
+func makeNestedTextError(token *parserToken, code int, errMsg string) NestedTextError {
+	err := NestedTextError{
 		Code: code,
 		msg:  errMsg,
 	}
@@ -222,7 +222,7 @@ func makeNestedTextError(token *parserToken, code int, errMsg string) *NestedTex
 	return err
 }
 
-func wrapError(code int, errMsg string, err error) *NestedTextError {
+func wrapError(code int, errMsg string, err error) NestedTextError {
 	e := makeNestedTextError(nil, code, errMsg)
 	e.wrappedError = err
 	return e

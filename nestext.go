@@ -65,7 +65,7 @@ const (
 )
 
 // Error produces an error message from a NestedText error.
-func (e *NestedTextError) Error() string {
+func (e NestedTextError) Error() string {
 	return fmt.Sprintf("[%d,%d] %s", e.Line, e.Column, e.msg)
 }
 

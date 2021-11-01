@@ -17,101 +17,108 @@ import (
 //     { one:1, two:2, three:3, all: [1, 2, 3] }
 //
 //
-type inlineParser struct {
-	Text  string
-	Input *strings.Reader
-	stack []itemBuilder
+type inlineItemParser struct {
+	Text         string             // current line of NestedText
+	TextPosition int                // position of reader in string
+	Marker       int                // positional marker for start of key or value
+	Input        *strings.Reader    // reader for Text
+	stack        []inlineStackEntry // parse stack
 }
 
 // newInlineParser creates a fresh inline parser instance.
-func newInlineParser() *inlineParser {
-	return &inlineParser{
-		stack: make([]itemBuilder, 0, 10),
+func newInlineParser() *inlineItemParser {
+	return &inlineItemParser{
+		stack: make([]inlineStackEntry, 0, 10),
 	}
 }
 
-func (p *inlineParser) parse(input string) (result map[string]interface{}, err error) {
+func (p *inlineItemParser) parse(input string) (result interface{}, err error) {
 	p.Text = input
 	p.Input = strings.NewReader(input)
+	p.stack = p.stack[:0]
+	p.pushNonterm(initial)
+	fmt.Printf("|stack| = %d\n", len(p.stack))
 	//
-	var ch rune
-	var state inlineParserState
-	for !isErrorState(state) {
-		ch, _, err = p.Input.ReadRune()
+	var state inlineParserState = initial
+	for {
+		ch, w, err := p.Input.ReadRune()
 		if err != nil {
 			err = wrapError(ErrCodeIO, "I/O-error reading inline item", err)
 			return nil, err
 		}
 		chtype := inlineTokenFor(ch)
 		state = inlineStateMachine[state][chtype]
-		if !isErrorState(state) {
-			ok := inlineStateMachineActions[state](p.stack[len(p.stack)-1])
-			if !ok {
-				state = e // jump to error state
-			}
+		if isErrorState(state) {
+			break
 		}
+		fmt.Printf("state = %d\n", state)
+		fmt.Printf("|stack| = %d\n", len(p.stack))
+		ok := inlineStateMachineActions[state](p, ch, w)
+		if !ok {
+			state = e // flag error by setting error state
+			break
+		}
+		if isAccept(state) {
+			break
+		}
+		p.TextPosition += w
 	}
-	result, err = p.stack[len(p.stack)-1].Item()
-	return map[string]interface{}{}, nil
+	if isErrorState(state) {
+		err = p.stack[len(p.stack)-1].Error
+	} else {
+		result, err = p.stack[len(p.stack)-1].ReduceToItem()
+	}
+	return
 }
 
-type itemBuilder interface {
-	SetKey(string)
-	AppendValue(interface{})
-	Item() (interface{}, error)
-	SetError(error)
+func (p *inlineItemParser) pushNonterm(state inlineParserState) {
+	entry := inlineStackEntry{
+		Values: make([]interface{}, 0, 16),
+	}
+	if state == S2 { // dict
+		entry.Strings = make([]string, 0, 16)
+	}
+	p.stack = append(p.stack, entry)
 }
 
-type listBuilder struct {
-	List []interface{}
-	Err  error
+type inlineStackEntry struct {
+	Values  []interface{} // values
+	Strings []string      // keys, emtpy for list items
+	Error   error         // if error occured: remember it
 }
 
-func (lb *listBuilder) SetKey(string) {
-	fmt.Println("ERROR: LIST MAY NOT HAVE KEYS")
+func (entry inlineStackEntry) ReduceToItem() (interface{}, error) {
+	if entry.Strings == nil {
+		return entry.Values, nil
+	}
+	dict := make(map[string]interface{}, len(entry.Values))
+	if len(entry.Values) != len(entry.Strings) {
+		// error: mixed content
+		panic("mixed content")
+	}
+	for i, key := range entry.Strings {
+		dict[key] = entry.Values[i]
+	}
+	return dict, nil
 }
 
-func (lb *listBuilder) AppendValue(value interface{}) {
-	lb.List = append(lb.List, value)
+func (p *inlineItemParser) push(s *string, val interface{}) bool {
+	if val != nil {
+		fmt.Printf("push( %#v )\n", val)
+	}
+	tos := &p.stack[len(p.stack)-1]
+	tos.Values = append(tos.Values, val)
+	if s != nil {
+		tos.Strings = append(tos.Strings, *s)
+	}
+	return true
 }
-
-func (lb *listBuilder) Item() (interface{}, error) {
-	return lb.List, lb.Err
-}
-
-func (lb *listBuilder) SetError(err error) {
-	lb.Err = err
-}
-
-type dictBuilder struct {
-	Key  string
-	Dict map[string]interface{}
-	Err  error
-}
-
-func (db *dictBuilder) SetKey(key string) {
-	db.Key = key
-}
-
-func (db *dictBuilder) AppendValue(value interface{}) {
-	db.Dict[db.Key] = value
-}
-
-func (db *dictBuilder) Item() (interface{}, error) {
-	return db.Dict, db.Err
-}
-
-func (db *dictBuilder) SetError(err error) {
-	db.Err = err
-}
-
-var _ itemBuilder = &listBuilder{}
-var _ itemBuilder = &dictBuilder{}
 
 // --- Inline parser table ---------------------------------------------------
 
 type inlineParserState int8
 
+const initial inlineParserState = 0
 const e inlineParserState = -1
 const S1 inlineParserState = 10
 const S2 inlineParserState = 11
@@ -132,7 +139,7 @@ func isAccept(state inlineParserState) bool {
 
 //   A  \n ,  :  [  ]  {  }  S1 S2 A1 A2
 var inlineStateMachine = [...][8]inlineParserState{
-	{e, e, e, e, 1, e, 7, e},    // state 0, initial
+	{e, e, e, e, 7, e, 1, e},    // state 0, initial
 	{2, e, e, 3, e, e, e, A1},   // state 1
 	{2, e, e, 3, e, e, e, e},    // state 2
 	{4, e, 6, e, S2, e, S1, A1}, // state 3
@@ -148,25 +155,51 @@ var inlineStateMachine = [...][8]inlineParserState{
 	{e, e, e, e, e, e, e, e},    // state A2
 }
 
-var inlineStateMachineActions = [...]func(b itemBuilder) bool{
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	parseError,
-	accept,
-	accept,
+var inlineStateMachineActions = [...]func(p *inlineItemParser, ch rune, w int) bool{
+	nop, // 0
+	nop, // 1
+	nop, // 2
+	nop, // 3
+	nop, // 4
+	nop, // 5
+	nop, // 6
+	func(p *inlineItemParser, ch rune, w int) bool { // 7
+		if ch == ',' {
+			value := p.Text[p.Marker:p.TextPosition]
+			p.push(nil, value)
+		}
+		p.Marker = p.TextPosition + w
+		fmt.Printf("- Marker at %d\n", p.Marker)
+		return true
+	},
+	nop,    // 8
+	nop,    // 9
+	nop,    // S1
+	nop,    // S2
+	accept, // A1
+	func(p *inlineItemParser, ch rune, w int) bool { // A2
+		// state 9 has to set Marker = 0
+		if p.Marker > 0 {
+			value := p.Text[p.Marker:p.TextPosition]
+			p.push(nil, value)
+		}
+		return true
+	},
 }
 
-func parseError(b itemBuilder) bool {
+func nop(p *inlineItemParser, ch rune, w int) bool {
+	return true
+}
+
+func startValue(p *inlineItemParser, ch rune, w int) bool {
+	return true
+}
+
+func parserError(p *inlineItemParser, ch rune, w int) bool {
 	return false
 }
 
-func accept(b itemBuilder) bool {
+func accept(p *inlineItemParser, ch rune, w int) bool {
+	fmt.Println("ACCEPT")
 	return true
 }
