@@ -2,12 +2,13 @@ package nestext
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
 func TestInlineParseEOF(t *testing.T) {
-	ip := newInlineParser()
-	_, err := ip.parse("")
+	p := newInlineParser()
+	_, err := p.parse(_S2, "")
 	if err != nil {
 		nterr := &NestedTextError{}
 		if errors.As(err, nterr) {
@@ -22,29 +23,30 @@ func TestInlineParseEOF(t *testing.T) {
 	}
 }
 
-func TestInlineParseEmptyList(t *testing.T) {
-	ip := newInlineParser()
-	r, err := ip.parse("[]")
-	if err != nil {
-		t.Errorf(err.Error())
+func TestInlineParseItemsTable(t *testing.T) {
+	p := newInlineParser()
+	inputs := []struct {
+		text    string
+		initial inlineParserState
+		output  string
+	}{
+		//{"[]", _S2, "[]"},
+		//{"[x]", _S2, "[x]"},
+		{"[x,y]", _S2, "[x y]"},
+		//{"[[]]", S2, "[[]]"},
+		//{"{}", _S1, "map[]"},
+		//{"{a:x}", _S1, "map[a:b]"},
+		//{"{a:[x,y]}", _S1, "map[a:[x y]]"},
 	}
-	t.Logf("result = %v of type %#T", r, r)
-}
-
-func TestInlineParseListOfOne(t *testing.T) {
-	ip := newInlineParser()
-	r, err := ip.parse("[x]")
-	if err != nil {
-		t.Errorf(err.Error())
+	for i, input := range inputs {
+		r, err := p.parse(input.initial, input.text)
+		if err != nil {
+			t.Errorf(err.Error())
+		}
+		t.Logf("[%2d] result = %v of type %#T", i, r, r)
+		if fmt.Sprintf("%v", r) != input.output {
+			t.Errorf("[%2d] however, expected %q", i, input.output)
+		}
+		t.Logf("------------------------------------------")
 	}
-	t.Logf("result = %v of type %#T", r, r)
-}
-
-func TestInlineParseListOfTwo(t *testing.T) {
-	ip := newInlineParser()
-	r, err := ip.parse("[x,y]")
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	t.Logf("result = %v of type %#T", r, r)
 }
