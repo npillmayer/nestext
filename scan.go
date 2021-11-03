@@ -58,6 +58,9 @@ func newScanner(inputReader io.Reader) (*scanner, error) {
 //
 func (sc *scanner) NextToken() *parserToken {
 	token := newParserToken(sc.Buf.CurrentLine, int(sc.Buf.Cursor))
+	if sc.Buf.IsEof() {
+		return token
+	}
 	if sc.Step == nil {
 		sc.Step = sc.ScanItem
 	}
@@ -68,6 +71,7 @@ func (sc *scanner) NextToken() *parserToken {
 			break
 		}
 	}
+	fmt.Printf("# token = %s\n", token)
 	return token
 }
 
@@ -204,7 +208,7 @@ func isMatchingBracket(open, close rune) bool {
 
 // --- Inline scanner --------------------------------------------------------
 
-type inlineScanner struct {
+type inlineScanner struct { // TODO remove this
 	Input      strings.Reader
 	ByteCursor int64
 	Cursor     int64

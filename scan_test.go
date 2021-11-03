@@ -54,6 +54,23 @@ func TestScannerTopLevelIndent(t *testing.T) {
 	}
 }
 
+func TestScannerTerminate(t *testing.T) {
+	r := strings.NewReader("> This is a string\n> and this too\n")
+	sc, err := newScanner(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var token *parserToken
+	token = sc.NextToken()
+	t.Logf("token = %v\n", token)
+	token = sc.NextToken()
+	t.Logf("token = %v\n", token)
+	token = sc.NextToken()
+	t.Logf("token = %v\n", token)
+	token = sc.NextToken()
+	t.Logf("token = %v\n", token)
+}
+
 func TestScannerListItem(t *testing.T) {
 	r := strings.NewReader("# This is a comment\n- debug\n")
 	sc, err := newScanner(r)
