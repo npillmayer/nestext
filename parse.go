@@ -2,8 +2,58 @@ package nestext
 
 import (
 	"fmt"
+	"io"
 	"strings"
 )
+
+// === Top level parser ======================================================
+
+type NestedTextParser struct {
+	sc     *scanner
+	token  parserToken
+	inline *inlineItemParser
+	stack  []inlineStackEntry // result stack
+}
+
+func NewNestedTextParser() *NestedTextParser {
+	p := &NestedTextParser{
+		inline: newInlineParser(),
+	}
+	return p
+}
+
+func (p *NestedTextParser) Parse(r io.Reader) (result interface{}, err error) {
+	p.sc, err = newScanner(r)
+	if err != nil {
+		return
+	}
+	result, err = p.parseDocument()
+	return
+}
+
+func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
+	// initial token from scanner is a health check for the input source
+	if p.token = *p.sc.NextToken(); p.token.Error != nil {
+		return nil, p.token.Error
+	}
+	// read the first item line
+	if p.token = *p.sc.NextToken(); p.token.Error != nil {
+		return nil, p.token.Error
+	}
+	switch p.token.TokenType {
+	case stringMultiline:
+		panic("string items not yet implemented")
+	case inlineList:
+		var subItem interface{}
+		subItem, err = p.inline.parse(_S2, p.token.Content[0])
+		fmt.Printf("sub item = %v", subItem)
+		//p.push(p.tos().Key, subItem)
+	case inlineDict:
+	default:
+		panic("item type not yet implemented")
+	}
+	return
+}
 
 // === Inline item parser ====================================================
 //
