@@ -115,7 +115,7 @@ func newParserToken(line, col int) *parserToken {
 }
 
 func (token *parserToken) String() string {
-	return fmt.Sprintf("tag[at(%d,%d) ind=%d type=%s %#v]", token.LineNo, token.ColNo, token.Indent,
+	return fmt.Sprintf("token[at(%d,%d) ind=%d type=%s %#v]", token.LineNo, token.ColNo, token.Indent,
 		token.TokenType, token.Content)
 }
 
