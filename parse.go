@@ -41,21 +41,7 @@ func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
-	switch p.token.TokenType {
-	case stringMultiline:
-		result, err = p.parseMultiString()
-	case inlineList:
-		result, err = p.inline.parse(_S2, p.token.Content[0])
-		fmt.Printf("sub list = %v\n", result)
-	case inlineDict:
-		result, err = p.inline.parse(_S1, p.token.Content[0])
-		fmt.Printf("sub dict = %v\n", result)
-	case listItem:
-	case listItemMultiline:
-		result, err = p.parseList()
-	default:
-		panic("item type not yet implemented")
-	}
+	result, err = p.parseAny(0)
 	fmt.Printf("final token = %s\n", p.token)
 	fmt.Printf("final line = %d\n", p.sc.Buf.CurrentLine)
 	if err == nil && !p.sc.Buf.isEof { // TODO this test is not sufficient
@@ -65,12 +51,35 @@ func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
 	return
 }
 
-func (p *NestedTextParser) parseList() (result interface{}, err error) {
+func (p *NestedTextParser) parseAny(indent int) (result interface{}, err error) {
+	fmt.Printf("# parseAny(%d)\n", indent)
+	if p.token.Indent < indent {
+		fmt.Println("# <-outdent")
+		return nil, nil
+	}
+	switch p.token.TokenType {
+	case stringMultiline:
+		result, err = p.parseMultiString(p.token.Indent)
+	case inlineList:
+		result, err = p.inline.parse(_S2, p.token.Content[0])
+		fmt.Printf("sub list = %v\n", result)
+	case inlineDict:
+		result, err = p.inline.parse(_S1, p.token.Content[0])
+		fmt.Printf("sub dict = %v\n", result)
+	case listItem, listItemMultiline:
+		result, err = p.parseList(indent)
+	default:
+		panic("item type not yet implemented")
+	}
+	return
+}
+
+func (p *NestedTextParser) parseList(indent int) (result interface{}, err error) {
+	fmt.Printf("# parseList(%d)\n", indent)
 	p.pushNonterm(false)
 	switch p.token.TokenType {
-	case listItem:
-	case listItemMultiline:
-		result, err = p.parseListItems(p.token.Indent)
+	case listItem, listItemMultiline:
+		_, err = p.parseListItems(p.token.Indent)
 	default:
 		return nil, makeNestedTextError(p.token, ErrCodeFormatIllegalTag,
 			fmt.Sprintf("unexpected item type: %s", p.token.TokenType))
@@ -84,6 +93,7 @@ func (p *NestedTextParser) parseList() (result interface{}, err error) {
 }
 
 func (p *NestedTextParser) parseListItems(indent int) (result interface{}, err error) {
+	fmt.Printf("# parseListItems(%d)\n", indent)
 	var value interface{}
 	for p.token.TokenType == listItem || p.token.TokenType == listItemMultiline {
 		if p.token.TokenType == listItem {
@@ -95,25 +105,44 @@ func (p *NestedTextParser) parseListItems(indent int) (result interface{}, err e
 			p.push(nil, value)
 		}
 	}
+	fmt.Printf("# <-- parseListItems\n")
 	return p.tos().Values, err
 }
 
 func (p *NestedTextParser) parseListItem(indent int) (result interface{}, err error) {
+	fmt.Printf("# parseListItem(%d)\n", indent)
 	if p.token.Indent != indent {
 		return nil, nil
 	}
-	return p.token.Content[0], nil
+	value := p.token.Content[0]
+	if p.token = p.sc.NextToken(); p.token.Error != nil {
+		return nil, p.token.Error
+	}
+	fmt.Printf("# <-- parseListItem\n")
+	return value, err
 }
 
 func (p *NestedTextParser) parseListItemMultiline(indent int) (result interface{}, err error) {
+	fmt.Printf("# --> parseListItemMultiline(%d)\n", indent)
 	if p.token.Indent != indent {
 		return nil, nil
 	}
-	return p.token.Content[0], nil
+	if p.token = p.sc.NextToken(); p.token.Error != nil {
+		return nil, p.token.Error
+	}
+	if p.token.Indent <= indent {
+		return nil, nil
+	}
+	result, err = p.parseAny(p.token.Indent)
+	fmt.Printf("# <-- parseListItemMultiline\n")
+	return
 }
 
-func (p *NestedTextParser) parseMultiString() (result interface{}, err error) {
-	indent := p.token.Indent
+func (p *NestedTextParser) parseMultiString(indent int) (result interface{}, err error) {
+	fmt.Printf("# --> parseMultiString(%d)\n", indent)
+	if p.token.Indent != indent {
+		return nil, nil
+	}
 	builder := strings.Builder{}
 	builder.WriteString(p.token.Content[0])
 	for !p.sc.Buf.isEof && err == nil {
@@ -127,6 +156,7 @@ func (p *NestedTextParser) parseMultiString() (result interface{}, err error) {
 		builder.WriteRune('\n')
 		builder.WriteString(p.token.Content[0])
 	}
+	fmt.Println("# <-- parseMultiString")
 	return builder.String(), nil
 }
 
@@ -157,7 +187,7 @@ func (p *NestedTextParser) pop() (tos *inlineStackEntry) {
 
 func (p *NestedTextParser) push(s *string, val interface{}) bool {
 	if val != nil {
-		fmt.Printf("push( %#v )\n", val)
+		fmt.Printf("# push( %#v )\n", val)
 	}
 	tos := &p.stack[len(p.stack)-1]
 	tos.Values = append(tos.Values, val)
@@ -305,7 +335,7 @@ func (p *inlineItemParser) pop() (tos *inlineStackEntry) {
 
 func (p *inlineItemParser) push(s *string, val interface{}) bool {
 	if val != nil {
-		fmt.Printf("push( %#v )\n", val)
+		fmt.Printf("# push( %#v )\n", val)
 	}
 	tos := &p.stack[len(p.stack)-1]
 	tos.Values = append(tos.Values, val)
@@ -317,7 +347,7 @@ func (p *inlineItemParser) push(s *string, val interface{}) bool {
 
 func (entry inlineStackEntry) ReduceToItem() (interface{}, error) {
 	if entry.Keys == nil {
-		fmt.Printf("reduce to %v of type %T\n", entry.Values, entry.Values)
+		fmt.Printf("# reduce to %v of type %T\n", entry.Values, entry.Values)
 		return entry.Values, nil
 	}
 	dict := make(map[string]interface{}, len(entry.Values))
@@ -328,7 +358,7 @@ func (entry inlineStackEntry) ReduceToItem() (interface{}, error) {
 	for i, key := range entry.Keys {
 		dict[key] = entry.Values[i]
 	}
-	fmt.Printf("reduce to %v of type %T\n", dict, dict)
+	fmt.Printf("# reduce to %v of type %T\n", dict, dict)
 	return dict, nil
 }
 

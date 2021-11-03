@@ -11,7 +11,15 @@ func TestParseSimple(t *testing.T) {
 		text   string
 		output string
 	}{
-		{"> Hello\n> World!\n: key\n", "[]"},
+		//{"> Hello\n> World!\n: key\n", "[]"}, // error: extra :
+		{`# multi-line list item
+- Hello
+-
+  > World
+  > !
+- ok?
+> error
+`, "[x]"},
 		//{"[x]", "[x]"},
 		//{"[x,y]", "[x y]"},
 		//{"[[]]" "[[]]"},
