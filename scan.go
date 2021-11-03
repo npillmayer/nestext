@@ -182,13 +182,24 @@ func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, tok
 
 func (sc *scanner) recognizeInlineItem(toktype parserTokenType, token *parserToken) *parserToken {
 	closing := sc.Buf.Text[len(sc.Buf.Text)-1]
-	if rune(closing) != sc.Buf.Lookahead {
+	if !isMatchingBracket(sc.Buf.Lookahead, rune(closing)) {
 		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
-			"inline-item does not match opening tag")
+			fmt.Sprintf("inline-item does not match opening tag: %#U vs %#U",
+				sc.Buf.Lookahead, rune(closing)))
 	}
 	token.TokenType = toktype
 	token.Content = append(token.Content, sc.Buf.ReadLineRemainder())
 	return token
+}
+
+func isMatchingBracket(open, close rune) bool {
+	if open == '[' {
+		return close == ']'
+	}
+	if open == '{' {
+		return close == '}'
+	}
+	return false
 }
 
 // --- Inline scanner --------------------------------------------------------
