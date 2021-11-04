@@ -165,7 +165,7 @@ func (p *NestedTextParser) parseDictKeyValuePairs(indent int) (result interface{
 		case inlineDictKey:
 			kv, err = p.parseDictKeyAnyValuePair(indent)
 		case dictKeyMultiline:
-			//value, err = p.parseKeyValuePairWithMultilineKey(indent)
+			kv, err = p.parseDictKeyValuePairWithMultilineKey(indent)
 		}
 		if kv.value != nil && err == nil {
 			p.push(kv.key, kv.value)
@@ -198,17 +198,49 @@ func (p *NestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair
 		return
 	}
 	fmt.Printf(".go\n")
-	key := p.token.Content[0]
+	kv.key = &p.token.Content[0]
+	if p.token = p.sc.NextToken(); p.token.Error != nil {
+		return kv, p.token.Error
+	}
+	if p.token.Indent <= indent {
+		kv.value = ""
+		return
+	}
+	kv.value, err = p.parseAny(p.token.Indent)
+	fmt.Println("# <-- parseDictAnyKeyValuePair")
+	return
+}
+
+func (p *NestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv keyValuePair, err error) {
+	fmt.Printf("# --> parseDictKeyValuePairWithMultilineKey(%d)\n", indent)
+	if p.token.Indent != indent {
+		fmt.Printf(".X\n")
+		return
+	}
+	builder := strings.Builder{}
+	builder.WriteString(p.token.Content[0])
+	for !p.sc.Buf.isEof && err == nil {
+		p.token = p.sc.NextToken()
+		if p.token.Error != nil {
+			return kv, p.token.Error
+		}
+		if p.token.TokenType != dictKeyMultiline || p.token.Indent != indent {
+			break
+		}
+		builder.WriteRune('\n')
+		builder.WriteString(p.token.Content[0])
+	}
+	key := builder.String()
+	kv.key = &key
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return kv, p.token.Error
 	}
 	if p.token.Indent <= indent {
 		return keyValuePair{key: &key, value: ""}, nil
 	}
-	var value interface{}
-	value, err = p.parseAny(p.token.Indent)
-	fmt.Println("# <-- parseDictAnyKeyValuePair")
-	return keyValuePair{key: &key, value: value}, err
+	kv.value, err = p.parseAny(p.token.Indent)
+	fmt.Println("# <-- parseDictKeyValuePairWithMultilineKey")
+	return
 }
 
 func (p *NestedTextParser) parseMultiString(indent int) (result interface{}, err error) {

@@ -22,8 +22,14 @@ func TestParseSimple(t *testing.T) {
 		a: Hello
 		b: World
 		`, true}, */
+		/* 		{`# multi-line dict
+		a:
+		  > Hello World!
+		b: How are you?
+		`, true}, */
 		{`# multi-line dict
-a:
+: A
+: a
   > Hello World!
 b: How are you?
 `, true},
