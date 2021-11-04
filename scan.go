@@ -72,7 +72,7 @@ func (sc *scanner) NextToken() *parserToken {
 			break
 		}
 	}
-	fmt.Printf("# token = %s\n", token)
+	fmt.Printf("# new %s\n", token)
 	return token
 }
 
@@ -103,7 +103,7 @@ func (sc *scanner) ScanFileStart(token *parserToken) (*parserToken, scannerStep)
 
 // StepItem is a step function to start recognizing a line-level item.
 func (sc *scanner) ScanItem(token *parserToken) (*parserToken, scannerStep) {
-	fmt.Println("---> ScanItem")
+	//fmt.Println("---> ScanItem")
 	if sc.Buf.Lookahead == ' ' {
 		return token, sc.ScanIndentation
 	}
@@ -125,7 +125,7 @@ func (sc *scanner) ScanIndentation(token *parserToken) (*parserToken, scannerSte
 // which start with the key's string.
 //
 func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) {
-	fmt.Printf("---> ScanItemBody, LA = '%#U'\n", sc.Buf.Lookahead)
+	//fmt.Printf("---> ScanItemBody, LA = '%#U'\n", sc.Buf.Lookahead)
 	switch sc.Buf.Lookahead {
 	case '-': // list value, either single-line or multi-line. From the spec:
 		// If the first non-space character on a line is a dash followed immediately by a space (-␣) or

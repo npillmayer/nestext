@@ -11,7 +11,7 @@ func TestParseSimple(t *testing.T) {
 		text    string
 		correct bool
 	}{
-		{"> Hello\n> World!\n: key\n", false}, // extra ':' line
+		//{"> Hello\n> World!\n: key\n", false}, // extra ':' line
 		/* 		{`# multi-line list item
 		- Hello
 		-

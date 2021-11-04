@@ -119,15 +119,17 @@ func (p *NestedTextParser) parseListItem(indent int) (result interface{}, err er
 }
 
 func (p *NestedTextParser) parseListItemMultiline(indent int) (result interface{}, err error) {
-	fmt.Printf("# --> parseListItemMultiline(%d)\n", indent)
+	fmt.Printf("# --> parseListItemMultiline(%d)..", indent)
 	if p.token.Indent != indent {
+		fmt.Printf(".X\n")
 		return nil, nil
 	}
+	fmt.Printf(".go\n")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
 	if p.token.Indent <= indent {
-		return nil, nil
+		return "", nil
 	}
 	result, err = p.parseAny(p.token.Indent)
 	fmt.Println("# <-- parseListItemMultiline")
@@ -161,7 +163,7 @@ func (p *NestedTextParser) parseDictKeyValuePairs(indent int) (result interface{
 		case inlineDictKeyValue:
 			kv, err = p.parseDictKeyValuePair(indent)
 		case inlineDictKey:
-			//value, err = p.parseDictKeyValuePair(indent)
+			kv, err = p.parseDictKeyAnyValuePair(indent)
 		case dictKeyMultiline:
 			//value, err = p.parseKeyValuePairWithMultilineKey(indent)
 		}
@@ -179,13 +181,33 @@ func (p *NestedTextParser) parseDictKeyValuePair(indent int) (kv keyValuePair, e
 		fmt.Printf(".X\n")
 		return
 	}
-	fmt.Printf(".ok\n")
+	fmt.Printf(".go\n")
 	key := p.token.Content[0]
 	value := p.token.Content[1]
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return kv, p.token.Error
 	}
 	fmt.Println("# <-- parseDictKeyValuePair")
+	return keyValuePair{key: &key, value: value}, err
+}
+
+func (p *NestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair, err error) {
+	fmt.Printf("# parseDictAnyKeyValuePair(%d)..", indent)
+	if p.token.Indent != indent {
+		fmt.Printf(".X\n")
+		return
+	}
+	fmt.Printf(".go\n")
+	key := p.token.Content[0]
+	if p.token = p.sc.NextToken(); p.token.Error != nil {
+		return kv, p.token.Error
+	}
+	if p.token.Indent <= indent {
+		return keyValuePair{key: &key, value: ""}, nil
+	}
+	var value interface{}
+	value, err = p.parseAny(p.token.Indent)
+	fmt.Println("# <-- parseDictAnyKeyValuePair")
 	return keyValuePair{key: &key, value: value}, err
 }
 
@@ -238,7 +260,13 @@ func (p *NestedTextParser) pop() (tos *inlineStackEntry) {
 
 func (p *NestedTextParser) push(s *string, val interface{}) bool {
 	if val != nil {
-		fmt.Printf("# push( %#v )\n", val)
+		var key string
+		if s == nil {
+			key = "-"
+		} else {
+			key = *s
+		}
+		fmt.Printf("# push( %q , %#v )\n", key, val)
 	}
 	tos := &p.stack[len(p.stack)-1]
 	tos.Values = append(tos.Values, val)
