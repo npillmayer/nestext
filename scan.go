@@ -59,6 +59,7 @@ func newScanner(inputReader io.Reader) (*scanner, error) {
 func (sc *scanner) NextToken() *parserToken {
 	token := newParserToken(sc.Buf.CurrentLine, int(sc.Buf.Cursor))
 	if sc.Buf.IsEof() {
+		token.TokenType = eof
 		return token
 	}
 	if sc.Step == nil {
