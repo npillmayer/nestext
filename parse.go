@@ -232,9 +232,6 @@ func (p *NestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv
 	}
 	key := builder.String()
 	kv.key = &key
-	if p.token = p.sc.NextToken(); p.token.Error != nil {
-		return kv, p.token.Error
-	}
 	if p.token.Indent <= indent {
 		return keyValuePair{key: &key, value: ""}, nil
 	}
