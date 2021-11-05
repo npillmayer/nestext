@@ -69,6 +69,11 @@ func (sc *scanner) NextToken() *parserToken {
 		token, sc.Step = sc.Step(token)
 		if token.Error != nil {
 			sc.LastError = token.Error
+			sc.Buf.AdvanceLine()
+			break
+		}
+		if sc.Buf.Line.Size() == 0 {
+			fmt.Printf("===> line empty\n")
 			break
 		}
 	}

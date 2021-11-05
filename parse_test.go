@@ -5,40 +5,43 @@ import (
 	"testing"
 )
 
-func TestParseSimple(t *testing.T) {
+func TestTableParse(t *testing.T) {
 	p := NewNestedTextParser()
+	t.Logf("============================================================")
 	inputs := []struct {
 		text    string
 		correct bool
 	}{
-		//{"> Hello\n> World!\n: key\n", false}, // extra ':' line
-		/* 		{`# multi-line list item
-		- Hello
-		-
-		  > World
-		  > !
-		`, true}, */
-		/* 		{`# multi-line dict
-		a: Hello
-		b: World
-		`, true}, */
-		/* 		{`# multi-line dict
-		a:
-		  > Hello World!
-		b: How are you?
-		`, true}, */
+		{`# string
+> Hello
+> World
+`, true},
+		{`# string with error
+> Hello
+> World!
+: key
+`, false}, // extra ':' line
+		{`# multi-line list item
+- Hello
+-
+  > World
+  > !
+`, true},
+		{`# dict
+a: Hello
+b: World
+`, true},
+		{`# multi-line dict
+a:
+  > Hello World!
+b: How are you?
+`, true},
 		{`# multi-line dict
 : A
 : a
   > Hello World!
 b: How are you?
 `, true},
-		//{"[x]", "[x]"},
-		//{"[x,y]", "[x y]"},
-		//{"[[]]" "[[]]"},
-		//{"{}", "map[]"},
-		//{"{a:x}", "map[a:b]"},
-		//{"{a:[x,y]}", "map[a:[x y]]"},
 	}
 	for i, input := range inputs {
 		buf := strings.NewReader(input.text)
@@ -52,5 +55,6 @@ b: How are you?
 		} else {
 			t.Logf("[%2d] got expected error: %s", i, err.Error())
 		}
+		t.Logf("------------------------------------------------------------")
 	}
 }

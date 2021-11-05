@@ -37,7 +37,7 @@ func TestScannerStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sc.Buf.isEof {
+	if sc.Buf.isEof == 0 {
 		t.Errorf("expected scanner to be at EOF, isn't")
 	}
 }
@@ -55,20 +55,22 @@ func TestScannerTopLevelIndent(t *testing.T) {
 }
 
 func TestScannerTerminate(t *testing.T) {
-	r := strings.NewReader("> This is a string\n> and this too\n")
+	r := strings.NewReader("> This is a string\n> and this too\n?    ")
 	sc, err := newScanner(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var token *parserToken
 	token = sc.NextToken()
-	t.Logf("token = %v\n", token)
+	logToken(token, t)
 	token = sc.NextToken()
-	t.Logf("token = %v\n", token)
+	logToken(token, t)
 	token = sc.NextToken()
-	t.Logf("token = %v\n", token)
+	logToken(token, t)
 	token = sc.NextToken()
-	t.Logf("token = %v\n", token)
+	logToken(token, t)
+	token = sc.NextToken()
+	logToken(token, t)
 }
 
 func TestScannerListItem(t *testing.T) {
@@ -99,7 +101,7 @@ func TestScannerListItemIllegal(t *testing.T) {
 	}
 	sc.NextToken()        // doc root
 	tok := sc.NextToken() // item
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.Error == nil {
 		t.Errorf("item expected to have error; hasn't")
 	} else {
@@ -118,7 +120,7 @@ func TestScannerLongListItem(t *testing.T) {
 		t.Errorf("top-level document root expected to parse without error; didn't: %v", tok.Error)
 	}
 	tok = sc.NextToken()
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != listItemMultiline {
 		t.Errorf("item expected to be of type multiline list item; is: %s", tok.TokenType)
 	}
@@ -132,12 +134,12 @@ func TestScannerMultilineString(t *testing.T) {
 	}
 	sc.NextToken()        // doc root
 	tok := sc.NextToken() // string
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != stringMultiline {
 		t.Errorf("item expected to be of type multiline string; is: %s", tok.TokenType)
 	}
 	tok = sc.NextToken() // string
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != stringMultiline {
 		t.Errorf("item expected to be of type multiline string; is: %s", tok.TokenType)
 	}
@@ -151,12 +153,12 @@ func TestScannerMultilineKey(t *testing.T) {
 	}
 	sc.NextToken()        // doc root
 	tok := sc.NextToken() // key
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != dictKeyMultiline {
 		t.Errorf("item expected to be of type multiline key; is: %s", tok.TokenType)
 	}
 	tok = sc.NextToken() // key
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != dictKeyMultiline {
 		t.Errorf("item expected to be of type multiline key; is: %s", tok.TokenType)
 	}
@@ -170,7 +172,7 @@ func TestScannerInlineError(t *testing.T) {
 	}
 	sc.NextToken()        // doc root
 	tok := sc.NextToken() // inline list with errors
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != inlineList {
 		t.Errorf("item expected to be of type inline list; is: %s", tok.TokenType)
 	}
@@ -187,7 +189,7 @@ func TestScannerInlineDictKeyValue(t *testing.T) {
 	}
 	sc.NextToken()        // doc root
 	tok := sc.NextToken() // dict key-value pair
-	logTag(tok, t)
+	logToken(tok, t)
 	if tok.TokenType != inlineDictKeyValue {
 		t.Errorf("item expected to be of type inline key-value; is: %s", tok.TokenType)
 	}
@@ -195,15 +197,9 @@ func TestScannerInlineDictKeyValue(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 
-func TestInlineScanner1(t *testing.T) {
-	_ = newInlineScanner("[]")
-}
-
-// ---------------------------------------------------------------------------
-
-func logTag(tag *parserToken, t *testing.T) {
-	t.Logf("token = %v", tag)
-	if tag.Error != nil {
-		t.Logf("      + error: %v", tag.Error)
+func logToken(token *parserToken, t *testing.T) {
+	t.Logf("token = %v", token)
+	if token.Error != nil {
+		t.Logf("      + error:  %v", token.Error)
 	}
 }

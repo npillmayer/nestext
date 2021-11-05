@@ -12,15 +12,15 @@ import (
 // lineBuffer is an abstraction of a NestedText document source.
 // The scanner will use a lineBuffer for input.
 type lineBuffer struct {
-	Lookahead   rune           // the next UTF-8 character
-	Cursor      int64          // position of lookahead in character count
-	ByteCursor  int64          // position of lookahead in byte count
-	CurrentLine int            // current line number, starting at 1 (= next "expected line")
-	Input       *bufio.Scanner // we use this to break up input into lines
-	Text        string         // holds a copy of Input
-	Line        strings.Reader // reader on Text
-	isEof       bool           // is this buffer done reading?
-	LastError   error          // last error, if any (except EOF errors)
+	Lookahead   rune            // the next UTF-8 character
+	Cursor      int64           // position of lookahead in character count
+	ByteCursor  int64           // position of lookahead in byte count
+	CurrentLine int             // current line number, starting at 1 (= next "expected line")
+	Input       *bufio.Scanner  // we use this to break up input into lines
+	Text        string          // holds a copy of Input
+	Line        *strings.Reader // reader on Text
+	isEof       int             // is this buffer done reading? May be 0, 1 or 2.
+	LastError   error           // last error, if any (except EOF errors)
 }
 
 const eolMarker = '\n'
@@ -38,11 +38,15 @@ func newLineBuffer(inputDoc io.Reader) *lineBuffer {
 }
 
 func (buf *lineBuffer) IsEof() bool {
-	return buf.isEof && buf.ByteCursor >= buf.Line.Size()
+	//return buf.isEof && buf.ByteCursor >= buf.Line.Size()
+	return buf.isEof >= 2 || buf.Line.Size() == 0
 }
 
+// AdvanceCursor moves the rune cursor within the current line one character forward.
+// If the cursor is already at the end of the line, `eolMarker` is returned. No moving to
+// the next line is performed.
 func (buf *lineBuffer) AdvanceCursor() error {
-	if buf.isEof {
+	if buf.isEof > 2 {
 		return errAtEof
 	}
 	if buf.ByteCursor >= buf.Line.Size() { // at end of line, set lookahead to eolMarker
@@ -78,10 +82,17 @@ func (buf *lineBuffer) readRune() (rune, error) {
 // Line-count and cursor are updated.
 //
 func (buf *lineBuffer) AdvanceLine() error {
+	fmt.Printf("===> advance line..")
 	buf.Cursor = 0
 	buf.ByteCursor = 0
 	// iterate over the lines of the input document until valid line found or EOF
-	for !buf.isEof {
+	if buf.isEof == 1 {
+		buf.isEof = 2
+		fmt.Printf("..1->2")
+		return errAtEof
+	}
+	fmt.Printf("..ok\n")
+	for buf.isEof == 0 {
 		buf.CurrentLine++
 		fmt.Printf("===> reading line #%d\n", buf.CurrentLine)
 		if !buf.Input.Scan() { // could not read a new line: either I/O-error or EOF
@@ -89,17 +100,18 @@ func (buf *lineBuffer) AdvanceLine() error {
 				return wrapError(ErrCodeIO, "I/O error while reading input", err)
 			}
 			fmt.Println("===> EOF !")
-			buf.isEof = true
-			buf.Line = *strings.NewReader("")
+			buf.isEof = 1
+			buf.Line = strings.NewReader("")
 			return errAtEof
 		}
 		buf.Text = buf.Input.Text()
+		fmt.Printf("===> %q\n", buf.Text)
 		if !buf.IsIgnoredLine() {
-			buf.Line = *strings.NewReader(buf.Text)
+			buf.Line = strings.NewReader(buf.Text)
 			break
 		}
 	}
-	buf.Line = *strings.NewReader(buf.Text)
+	buf.Line = strings.NewReader(buf.Text)
 	return buf.AdvanceCursor()
 }
 

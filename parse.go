@@ -34,10 +34,12 @@ func (p *NestedTextParser) Parse(r io.Reader) (result interface{}, err error) {
 
 func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
 	// initial token from scanner is a health check for the input source
+	fmt.Println("# requesting document root from scanner")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
 	// read the first item line
+	fmt.Println("# parsers starts requesting lines")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
@@ -217,9 +219,10 @@ func (p *NestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv
 		fmt.Printf(".X\n")
 		return
 	}
+	fmt.Printf(".go\n")
 	builder := strings.Builder{}
 	builder.WriteString(p.token.Content[0])
-	for !p.sc.Buf.isEof && err == nil {
+	for err == nil {
 		p.token = p.sc.NextToken()
 		if p.token.Error != nil {
 			return kv, p.token.Error
@@ -241,23 +244,29 @@ func (p *NestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv
 }
 
 func (p *NestedTextParser) parseMultiString(indent int) (result interface{}, err error) {
-	fmt.Printf("# --> parseMultiString(%d)\n", indent)
+	fmt.Printf("# --> parseMultiString(%d)..", indent)
 	if p.token.Indent != indent {
+		fmt.Printf(".X\n")
 		return nil, nil
 	}
+	fmt.Printf(".go\n")
 	builder := strings.Builder{}
 	builder.WriteString(p.token.Content[0])
-	for !p.sc.Buf.isEof && err == nil {
+	for err == nil {
 		p.token = p.sc.NextToken()
 		if p.token.Error != nil {
+			fmt.Printf("### err = %s\n", p.token.Error)
 			return builder.String(), p.token.Error
 		}
 		if p.token.TokenType != stringMultiline || p.token.Indent != indent {
+			fmt.Printf("# stop string at %s\n", p.token)
 			break
 		}
 		builder.WriteRune('\n')
 		builder.WriteString(p.token.Content[0])
+		fmt.Printf("# string.append %q\n", p.token.Content[0])
 	}
+	fmt.Printf("### eof = %v, err = %v\n", p.sc.Buf.IsEof(), err)
 	fmt.Println("# <-- parseMultiString")
 	return builder.String(), nil
 }

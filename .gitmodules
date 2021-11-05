@@ -1,0 +1,3 @@
+[submodule "testsuite/official_tests"]
+	path = testsuite/official_tests
+	url = https://github.com/KenKundert/nestedtext_tests.git
