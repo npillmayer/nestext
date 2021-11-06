@@ -38,7 +38,7 @@ type scannerStep func(*parserToken) (*parserToken, scannerStep)
 // newScanner creates a scanner for an input reader.
 func newScanner(inputReader io.Reader) (*scanner, error) {
 	if inputReader == nil {
-		return nil, makeNestedTextError(nil, ErrCodeFormatNoInput, "no input present")
+		return nil, makeParsingError(nil, ErrCodeFormatNoInput, "no input present")
 	}
 	buf := newLineBuffer(inputReader)
 	sc := &scanner{Buf: buf}
@@ -91,7 +91,7 @@ func (sc *scanner) NextToken() *parserToken {
 func (sc *scanner) ScanFileStart(token *parserToken) (*parserToken, scannerStep) {
 	token.TokenType = emptyDocument
 	if sc.Buf == nil {
-		token.Error = makeNestedTextError(token, ErrCodeFormatNoInput, "no valid input document")
+		token.Error = makeParsingError(token, ErrCodeFormatNoInput, "no valid input document")
 		return token, nil
 	}
 	if sc.Buf.IsEof() {
@@ -101,7 +101,7 @@ func (sc *scanner) ScanFileStart(token *parserToken) (*parserToken, scannerStep)
 	token.Indent = 0
 	if sc.Buf.Lookahead == ' ' {
 		// From the spec: There is no indentation on the top-level object.
-		token.Error = makeNestedTextError(token, ErrCodeFormatToplevelIndent, "top-level item must not be indented")
+		token.Error = makeParsingError(token, ErrCodeFormatToplevelIndent, "top-level item must not be indented")
 	}
 	return token, nil
 }
@@ -163,7 +163,7 @@ func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep)
 		token.Content = append(token.Content, strings.TrimSpace(key))
 		token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
 	case eolMarker: // Error: premature end of line
-		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
+		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
 			"dict key item not properly terminated by ':'")
 	default: // recognize everything as either part of the key or trailing whitespace
 		sc.Buf.match(anything())
@@ -181,7 +181,7 @@ func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, tok
 		return token
 	}
 	if sc.Buf.Lookahead != eolMarker {
-		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
+		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
 			fmt.Sprintf("item tag %q followed by illegal character %#U", tag, sc.Buf.Lookahead))
 		return token
 	}
@@ -193,7 +193,7 @@ func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, tok
 func (sc *scanner) recognizeInlineItem(toktype parserTokenType, token *parserToken) *parserToken {
 	closing := sc.Buf.Text[len(sc.Buf.Text)-1]
 	if !isMatchingBracket(sc.Buf.Lookahead, rune(closing)) {
-		token.Error = makeNestedTextError(token, ErrCodeFormatIllegalTag,
+		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
 			fmt.Sprintf("inline-item does not match opening tag: %#U vs %#U",
 				sc.Buf.Lookahead, rune(closing)))
 	}
@@ -227,24 +227,4 @@ func newInlineScanner(line string) *inlineScanner {
 		Input: *strings.NewReader(line),
 	}
 	return isc
-}
-
-// --- Helpers ---------------------------------------------------------------
-
-func makeNestedTextError(token *parserToken, code int, errMsg string) NestedTextError {
-	err := NestedTextError{
-		Code: code,
-		msg:  errMsg,
-	}
-	if token != nil {
-		err.Line = token.LineNo
-		err.Column = token.ColNo
-	}
-	return err
-}
-
-func wrapError(code int, errMsg string, err error) NestedTextError {
-	e := makeNestedTextError(nil, code, errMsg)
-	e.wrappedError = err
-	return e
 }

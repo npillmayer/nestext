@@ -74,6 +74,15 @@ func (e NestedTextError) Unwrap() error {
 	return e.wrappedError
 }
 
+// MakeNestedTextError creates a NestedTextError with a given error code and message.
+func MakeNestedTextError(code int, errMsg string) NestedTextError {
+	err := NestedTextError{
+		Code: code,
+		msg:  errMsg,
+	}
+	return err
+}
+
 // --- Parser token type -----------------------------------------------------
 
 // parserToken is a type for communicating between the line-level scanner and the parser.
@@ -150,4 +159,24 @@ func inlineTokenFor(r rune) inlineTokenType {
 		return t
 	}
 	return character
+}
+
+// --- Error helpers ---------------------------------------------------------
+
+func makeParsingError(token *parserToken, code int, errMsg string) NestedTextError {
+	err := NestedTextError{
+		Code: code,
+		msg:  errMsg,
+	}
+	if token != nil {
+		err.Line = token.LineNo
+		err.Column = token.ColNo
+	}
+	return err
+}
+
+func wrapError(code int, errMsg string, err error) NestedTextError {
+	e := makeParsingError(nil, code, errMsg)
+	e.wrappedError = err
+	return e
 }

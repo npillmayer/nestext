@@ -47,7 +47,7 @@ func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
 	fmt.Printf("final token = %s\n", p.token)
 	fmt.Printf("final line = %d\n", p.sc.Buf.CurrentLine)
 	if err == nil && p.token.TokenType != eof { // TODO this test is not sufficient
-		err = makeNestedTextError(p.token, ErrCodeFormat,
+		err = makeParsingError(p.token, ErrCodeFormat,
 			"unused content following valid input")
 	}
 	return
