@@ -83,6 +83,13 @@ func MakeNestedTextError(code int, errMsg string) NestedTextError {
 	return err
 }
 
+// WrapError wraps an error into a NestedTextError
+func WrapError(code int, errMsg string, err error) NestedTextError {
+	e := MakeNestedTextError(code, errMsg)
+	e.wrappedError = err
+	return e
+}
+
 // --- Parser token type -----------------------------------------------------
 
 // parserToken is a type for communicating between the line-level scanner and the parser.
@@ -173,10 +180,4 @@ func makeParsingError(token *parserToken, code int, errMsg string) NestedTextErr
 		err.Column = token.ColNo
 	}
 	return err
-}
-
-func wrapError(code int, errMsg string, err error) NestedTextError {
-	e := makeParsingError(nil, code, errMsg)
-	e.wrappedError = err
-	return e
 }

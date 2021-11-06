@@ -362,7 +362,7 @@ func (p *inlineItemParser) parse(initial inlineParserState, input string) (resul
 	for len(p.stack) > 0 {
 		ch, w, err := p.Input.ReadRune()
 		if err != nil {
-			err = wrapError(ErrCodeIO, "I/O-error reading inline item", err)
+			err = WrapError(ErrCodeIO, "I/O-error reading inline item", err)
 			return nil, err
 		}
 		chType := inlineTokenFor(ch)

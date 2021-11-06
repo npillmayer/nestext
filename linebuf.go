@@ -64,7 +64,7 @@ func (buf *lineBuffer) AdvanceCursor() error {
 func (buf *lineBuffer) readRune() (rune, error) {
 	r, runeLen, readerErr := buf.Line.ReadRune()
 	if readerErr != nil {
-		return 0, wrapError(ErrCodeIO, "I/O error while reading input character", readerErr)
+		return 0, WrapError(ErrCodeIO, "I/O error while reading input character", readerErr)
 	}
 	buf.ByteCursor += int64(runeLen)
 	buf.Cursor++
@@ -97,7 +97,7 @@ func (buf *lineBuffer) AdvanceLine() error {
 		fmt.Printf("===> reading line #%d\n", buf.CurrentLine)
 		if !buf.Input.Scan() { // could not read a new line: either I/O-error or EOF
 			if err := buf.Input.Err(); err != nil {
-				return wrapError(ErrCodeIO, "I/O error while reading input", err)
+				return WrapError(ErrCodeIO, "I/O error while reading input", err)
 			}
 			fmt.Println("===> EOF !")
 			buf.isEof = 1
