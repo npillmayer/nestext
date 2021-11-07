@@ -3,7 +3,7 @@ package nestext_test
 import (
 	"strings"
 
-	nestext "com.pillmayer.nestext"
+	"github.com/npillmayer/nestext"
 )
 
 func ExampleParse() {

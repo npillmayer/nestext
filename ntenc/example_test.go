@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"com.pillmayer.nestext/ntenc"
+	"github.com/npillmayer/nestext/ntenc"
 )
 
 func ExampleEncode() {

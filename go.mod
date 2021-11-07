@@ -1,3 +1,3 @@
-module com.pillmayer.nestext
+module github.com/npillmayer/nestext
 
 go 1.17

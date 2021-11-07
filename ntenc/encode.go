@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	nestext "com.pillmayer.nestext"
+	"github.com/npillmayer/nestext"
 )
 
 // InlineLimit is the threshold above which lists and dicts are not encoded as inline lists/dicts.
