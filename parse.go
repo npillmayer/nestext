@@ -377,7 +377,7 @@ func (p *nestedTextParser) push(s *string, val interface{}) bool {
 	if val != nil {
 		var key string
 		if s == nil {
-			key = "-"
+			key = "<nil>"
 		} else {
 			key = *s
 		}
