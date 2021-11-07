@@ -1,6 +1,7 @@
 package nestext
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -87,9 +88,41 @@ email: KateMcD@aol.com
 additional roles:
   - board member
 `
-	_, err := Parse(strings.NewReader(address))
+	result, err := Parse(strings.NewReader(address))
 	if err != nil {
 		t.Error(err)
 	}
-	// Output:
+	dump(" ", result.(map[string]interface{}))
+}
+
+// ----------------------------------------------------------------------
+
+func dump(space string, v interface{}) {
+	fmt.Print(space)
+	_dump(space, v)
+}
+
+func _dump(space string, v interface{}) {
+	if m, ok := v.(map[string]interface{}); ok {
+		fmt.Printf("{\n")
+		for k, v := range m {
+			fmt.Printf(space+"    "+"\"%v\": ", k)
+			if s, ok := v.(string); ok {
+				fmt.Printf("\"%v\":\n", s)
+			} else {
+				_dump(space+"    ", v)
+			}
+		}
+		fmt.Printf(space + "}\n")
+	} else if s, ok := v.(string); ok {
+		fmt.Printf("%s\"%v\"\n", space, s)
+	} else if l, ok := v.([]interface{}); ok {
+		fmt.Printf("[\n")
+		for _, lv := range l {
+			_dump(space+"    ", lv)
+		}
+		fmt.Printf(space + "]\n")
+	} else {
+		fmt.Printf("%v%v\n", space, v)
+	}
 }
