@@ -3,40 +3,113 @@ package nestext
 import (
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 )
 
-// === Top level parser ======================================================
+// TODO unify stack to a single type (now duplicates for top-level parser and inline-parser).
 
-type NestedTextParser struct {
-	sc     *scanner
-	token  *parserToken
-	inline *inlineItemParser
-	stack  []inlineStackEntry // result stack
+// Parse reads a NestedText input source and outputs a resulting hierarchy of values.
+// Values are stored as strings, []interface{} or map[string]interface{} respectively.
+//
+// If a non-nil error is returned, it will be of type NestedTextError.
+//
+func Parse(r io.Reader, opts ...Option) (interface{}, error) {
+	p := newParser()
+	for _, opt := range opts {
+		if err := opt(p); err != nil {
+			return nil, err
+		}
+	}
+	return p.Parse(r)
 }
 
-func NewNestedTextParser() *NestedTextParser {
-	p := &NestedTextParser{
+// === Parser Options ========================================================
+
+// Option is a type to influence the behaviour of the parsing process.
+// Multiple options may be passed to `Parse(…)`.
+type Option _Option
+
+type _Option func(*nestedTextParser) error // internal synonym to hide unterlying type of options.
+
+// TopLevel determines the top-level type of the return value from parsing.
+// Possible values are "list" and "dict". "list" will force the result to be an
+// []interface{} (of possibly one item), while "dict" will force the result to be of
+// type map[string]interface.
+//
+// For "dict", if the result is not a dict naturally, it will be wrapped in a map with a single
+// key = "dict". However, if the dict-option is given with a suffix (separated by '.'), the suffix
+// string will be used as the top-level key. In this case, even naturally parsed dicts will be
+// wrapped into a map with a single key (= the suffix to "dict.").
+//
+// Use as:
+//     nestext.Parse(reader, nestext.TopLevel("dict.config"))
+//
+// This will result in a return-value of map[string]interface{} with a single entry
+// map["config"] = …
+//
+// The default is for the parsing-result to be of the natural type corresponding to the
+// top-level item of the input source.
+// Option-strings other than "list" and "dict"/"dict.<suffix>" will result in an error
+// returned by Parse(…).
+//
+func TopLevel(top string) Option {
+	return func(p *nestedTextParser) (err error) {
+		switch top {
+		case "dict":
+			p.toplevel = "dict"
+		case "list":
+			p.toplevel = "list"
+		default:
+			if strings.HasPrefix(top, "dict.") {
+				p.toplevel = top[5:]
+			} else {
+				return MakeNestedTextError(ErrCodeUsage, `option TopLevel( "list" | "dict"(".<suffix>")? )`)
+			}
+		}
+		return nil
+	}
+}
+
+// === Top level parser ======================================================
+
+type nestedTextParser struct {
+	sc       *scanner           // line level scanner
+	token    *parserToken       // the current token from the scanner
+	inline   *inlineItemParser  // sub-parser for inline lists/dicts
+	stack    []inlineStackEntry // result stack
+	toplevel string             // type of top-level item
+}
+
+func newParser() *nestedTextParser {
+	p := &nestedTextParser{
 		inline: newInlineParser(),
 		stack:  make([]inlineStackEntry, 0, 10),
 	}
 	return p
 }
 
-func (p *NestedTextParser) Parse(r io.Reader) (result interface{}, err error) {
+func (p *nestedTextParser) Parse(r io.Reader) (result interface{}, err error) {
 	p.sc, err = newScanner(r)
 	if err != nil {
 		return
 	}
 	result, err = p.parseDocument()
+	if err == nil {
+		result = p.wrapResult(result)
+	}
 	return
 }
 
-func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
+func (p *nestedTextParser) parseDocument() (result interface{}, err error) {
 	// initial token from scanner is a health check for the input source
 	fmt.Println("# requesting document root from scanner")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
+	}
+	fmt.Printf("# document root = %s\n", p.token)
+	if p.token.TokenType == eof || p.token.TokenType == emptyDocument {
+		return nil, nil
 	}
 	// read the first item line
 	fmt.Println("# parsers starts requesting lines")
@@ -53,7 +126,7 @@ func (p *NestedTextParser) parseDocument() (result interface{}, err error) {
 	return
 }
 
-func (p *NestedTextParser) parseAny(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseAny(indent int) (result interface{}, err error) {
 	fmt.Printf("# parseAny(%d)\n", indent)
 	if p.token.Indent < indent {
 		fmt.Println("# <-outdent")
@@ -78,7 +151,7 @@ func (p *NestedTextParser) parseAny(indent int) (result interface{}, err error) 
 	return
 }
 
-func (p *NestedTextParser) parseList(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseList(indent int) (result interface{}, err error) {
 	fmt.Printf("# parseList(%d)\n", indent)
 	p.pushNonterm(false)
 	_, err = p.parseListItems(p.token.Indent)
@@ -90,7 +163,7 @@ func (p *NestedTextParser) parseList(indent int) (result interface{}, err error)
 	return
 }
 
-func (p *NestedTextParser) parseListItems(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseListItems(indent int) (result interface{}, err error) {
 	fmt.Printf("# parseListItems(%d)\n", indent)
 	var value interface{}
 	for p.token.TokenType == listItem || p.token.TokenType == listItemMultiline {
@@ -107,7 +180,7 @@ func (p *NestedTextParser) parseListItems(indent int) (result interface{}, err e
 	return p.tos().Values, err
 }
 
-func (p *NestedTextParser) parseListItem(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseListItem(indent int) (result interface{}, err error) {
 	fmt.Printf("# parseListItem(%d)\n", indent)
 	if p.token.Indent != indent {
 		return nil, nil
@@ -120,7 +193,7 @@ func (p *NestedTextParser) parseListItem(indent int) (result interface{}, err er
 	return value, err
 }
 
-func (p *NestedTextParser) parseListItemMultiline(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseListItemMultiline(indent int) (result interface{}, err error) {
 	fmt.Printf("# --> parseListItemMultiline(%d)..", indent)
 	if p.token.Indent != indent {
 		fmt.Printf(".X\n")
@@ -138,7 +211,7 @@ func (p *NestedTextParser) parseListItemMultiline(indent int) (result interface{
 	return
 }
 
-func (p *NestedTextParser) parseDict(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseDict(indent int) (result interface{}, err error) {
 	fmt.Printf("# parseDict(%d)\n", indent)
 	p.pushNonterm(true)
 	_, err = p.parseDictKeyValuePairs(p.token.Indent)
@@ -155,7 +228,7 @@ type keyValuePair struct {
 	value interface{}
 }
 
-func (p *NestedTextParser) parseDictKeyValuePairs(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseDictKeyValuePairs(indent int) (result interface{}, err error) {
 	fmt.Printf("# parseDictKeyValuePairs(%d)\n", indent)
 	var kv keyValuePair
 	for p.token.TokenType == inlineDictKeyValue || p.token.TokenType == inlineDictKey ||
@@ -169,15 +242,19 @@ func (p *NestedTextParser) parseDictKeyValuePairs(indent int) (result interface{
 		case dictKeyMultiline:
 			kv, err = p.parseDictKeyValuePairWithMultilineKey(indent)
 		}
-		if kv.value != nil && err == nil {
-			p.push(kv.key, kv.value)
+		if kv.value != nil {
+			if err == nil {
+				p.push(kv.key, kv.value)
+			}
+		} else {
+			break
 		}
 	}
 	fmt.Println("# <-- parseDictKeyValuePairs")
 	return p.tos().Keys, err
 }
 
-func (p *NestedTextParser) parseDictKeyValuePair(indent int) (kv keyValuePair, err error) {
+func (p *nestedTextParser) parseDictKeyValuePair(indent int) (kv keyValuePair, err error) {
 	fmt.Printf("# parseDictKeyValuePair(%d)..", indent)
 	if p.token.Indent != indent {
 		fmt.Printf(".X\n")
@@ -193,7 +270,7 @@ func (p *NestedTextParser) parseDictKeyValuePair(indent int) (kv keyValuePair, e
 	return keyValuePair{key: &key, value: value}, err
 }
 
-func (p *NestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair, err error) {
+func (p *nestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair, err error) {
 	fmt.Printf("# parseDictAnyKeyValuePair(%d)..", indent)
 	if p.token.Indent != indent {
 		fmt.Printf(".X\n")
@@ -213,7 +290,7 @@ func (p *NestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair
 	return
 }
 
-func (p *NestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv keyValuePair, err error) {
+func (p *nestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv keyValuePair, err error) {
 	fmt.Printf("# --> parseDictKeyValuePairWithMultilineKey(%d)\n", indent)
 	if p.token.Indent != indent {
 		fmt.Printf(".X\n")
@@ -243,7 +320,7 @@ func (p *NestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv
 	return
 }
 
-func (p *NestedTextParser) parseMultiString(indent int) (result interface{}, err error) {
+func (p *nestedTextParser) parseMultiString(indent int) (result interface{}, err error) {
 	fmt.Printf("# --> parseMultiString(%d)..", indent)
 	if p.token.Indent != indent {
 		fmt.Printf(".X\n")
@@ -271,7 +348,7 @@ func (p *NestedTextParser) parseMultiString(indent int) (result interface{}, err
 	return builder.String(), nil
 }
 
-func (p *NestedTextParser) pushNonterm(isDict bool) {
+func (p *nestedTextParser) pushNonterm(isDict bool) {
 	entry := inlineStackEntry{
 		Values: make([]interface{}, 0, 16),
 	}
@@ -281,14 +358,14 @@ func (p *NestedTextParser) pushNonterm(isDict bool) {
 	p.stack = append(p.stack, entry)
 }
 
-func (p *NestedTextParser) tos() *inlineStackEntry {
+func (p *nestedTextParser) tos() *inlineStackEntry {
 	if len(p.stack) > 0 {
 		return &p.stack[len(p.stack)-1]
 	}
 	return nil
 }
 
-func (p *NestedTextParser) pop() (tos *inlineStackEntry) {
+func (p *nestedTextParser) pop() (tos *inlineStackEntry) {
 	if len(p.stack) > 0 {
 		tos = p.tos()
 		p.stack = p.stack[:len(p.stack)-1]
@@ -296,7 +373,7 @@ func (p *NestedTextParser) pop() (tos *inlineStackEntry) {
 	return tos
 }
 
-func (p *NestedTextParser) push(s *string, val interface{}) bool {
+func (p *nestedTextParser) push(s *string, val interface{}) bool {
 	if val != nil {
 		var key string
 		if s == nil {
@@ -312,6 +389,31 @@ func (p *NestedTextParser) push(s *string, val interface{}) bool {
 		tos.Keys = append(tos.Keys, *s)
 	}
 	return true
+}
+
+// wrapResult wraps the result according to the TopLevel option.
+func (p *nestedTextParser) wrapResult(result interface{}) interface{} {
+	switch p.toplevel {
+	case "":
+		// do nothing
+	case "list":
+		v := reflect.ValueOf(result)
+		if v.Kind() != reflect.Slice {
+			result = []interface{}{result}
+		}
+	case "dict":
+		v := reflect.ValueOf(result)
+		if v.Kind() != reflect.Map {
+			result = map[string]interface{}{
+				"dict": result,
+			}
+		}
+	default:
+		result = map[string]interface{}{
+			p.toplevel: result,
+		}
+	}
+	return result
 }
 
 // === Inline item parser ====================================================

@@ -54,6 +54,7 @@ type NestedTextError struct {
 // We use a custom error type which contains a numeric error code.
 const (
 	NoError       = 0
+	ErrCodeUsage  = 1   // errorneous API call
 	ErrCodeIO     = 10  // error will wrap an underlying I/O error
 	ErrCodeSchema = 100 // schema violation; error may wrap an underlying error
 

@@ -156,6 +156,7 @@ func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) 
 // ScanInlineKey is a step function to recognize an inline key, optionally followed by an inline
 // value.
 func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep) {
+	fmt.Printf("===> scan inline key, input = %q\n", sc.Buf.Text)
 	switch sc.Buf.Lookahead { // consume characters; stop on ':' or EOL
 	case ':':
 		// remove trailing whitespace from key (=> Content[0])
@@ -163,8 +164,10 @@ func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep)
 		token.Content = append(token.Content, strings.TrimSpace(key))
 		token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
 	case eolMarker: // Error: premature end of line
+		fmt.Printf("===> scan inline key, input = %q\n", sc.Buf.Text)
 		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
 			"dict key item not properly terminated by ':'")
+		//fmt.Printf("===> key.content = %q\n", token.Content[0])
 	default: // recognize everything as either part of the key or trailing whitespace
 		sc.Buf.match(anything())
 		return token, sc.ScanInlineKey
@@ -210,21 +213,4 @@ func isMatchingBracket(open, close rune) bool {
 		return close == '}'
 	}
 	return false
-}
-
-// --- Inline scanner --------------------------------------------------------
-
-type inlineScanner struct { // TODO remove this
-	Input      strings.Reader
-	ByteCursor int64
-	Cursor     int64
-	Lookahead  inlineTokenType
-	State      int
-}
-
-func newInlineScanner(line string) *inlineScanner {
-	isc := &inlineScanner{
-		Input: *strings.NewReader(line),
-	}
-	return isc
 }

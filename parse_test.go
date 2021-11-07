@@ -5,8 +5,22 @@ import (
 	"testing"
 )
 
+func TestParserUsageError(t *testing.T) {
+	_, err := Parse(strings.NewReader(""), TopLevel("dict.config"))
+	if err != nil {
+		t.Logf("got error = %v", err)
+		t.Error("expected top-level 'dict.config' to be ok; produced error")
+	}
+	_, err = Parse(nil, TopLevel("dict-config"))
+	if err == nil {
+		t.Error("expected top-level 'dict-config' to produce an error; didn't")
+	} else {
+		t.Logf("got expected error = %v", err)
+	}
+}
+
 func TestTableParse(t *testing.T) {
-	p := NewNestedTextParser()
+	p := newParser()
 	t.Logf("============================================================")
 	inputs := []struct {
 		text    string
@@ -57,4 +71,25 @@ b: How are you?
 		}
 		t.Logf("------------------------------------------------------------")
 	}
+}
+
+func TestParseForExample(t *testing.T) {
+	address := `
+name: Katheryn McDaniel
+address:
+  > 138 Almond Street
+  > Topeka, Kansas 20697
+phone:
+  cell: 1-210-555-5297
+  home: 1-210-555-8470
+    # Katheryn prefers that we always call her on her cell phone.
+email: KateMcD@aol.com
+additional roles:
+  - board member
+`
+	_, err := Parse(strings.NewReader(address))
+	if err != nil {
+		t.Error(err)
+	}
+	// Output:
 }
