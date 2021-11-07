@@ -71,6 +71,15 @@ func TopLevel(top string) Option {
 	}
 }
 
+// TODO
+//
+// Default behaviour should be to strip LTR and RTL legacy control characters.
+func KeepLegacyBidi(keep bool) Option {
+	return func(p *nestedTextParser) (err error) {
+		return nil
+	}
+}
+
 // === Top level parser ======================================================
 
 type nestedTextParser struct {
@@ -566,7 +575,7 @@ func (p *inlineItemParser) push(s *string, val interface{}) bool {
 
 func (entry inlineStackEntry) ReduceToItem() (interface{}, error) {
 	if entry.Keys == nil {
-		fmt.Printf("# reduce to %v of type %T\n", entry.Values, entry.Values)
+		fmt.Printf("# reduce to %+v of type %T\n", entry.Values, entry.Values)
 		return entry.Values, nil
 	}
 	dict := make(map[string]interface{}, len(entry.Values))
