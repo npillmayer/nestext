@@ -65,14 +65,14 @@ Clients may use tools like `mitchellh/mapstructure` or `knadh/koanf` for further
 Sub-package `ntenc` provides an encoder-API:
 
 ```go
-	var config = map[string]interface{}{
-		"timeout": 20,
-		"ports":   []interface{}{6483, 8020, 9332},
-	}
+var config = map[string]interface{}{
+    "timeout": 20,
+    "ports":   []interface{}{6483, 8020, 9332},
+}
 
-	n, err := ntenc.Encode(config, os.Stdout)
-	fmt.Println("------------------------------")
-	fmt.Printf("%d bytes written, error: %v", n, err != nil)
+n, err := ntenc.Encode(config, os.Stdout)
+fmt.Println("------------------------------")
+fmt.Printf("%d bytes written, error: %v", n, err != nil)
 ```
 
 will yield:
@@ -86,3 +86,6 @@ will yield:
     ------------------------------
     46 bytes written, error: false
 
+## Status
+
+Tested with NestedText test suite for Version 3.1.0.
