@@ -73,13 +73,13 @@ func TopLevel(top string) Option {
 }
 
 // KeepLegacyBidi requests the parser to keep Unicode LTR and RTL markers.
-// This option is not yet functional!
 //
-// Default behaviour is to strip LTR and RTL legacy control characters.
-// For security reasons applications should usually treat LTR/RTL cautiously when read
-// in from external sources. You can find various sources on the internet discussion
-// this problem, including a policy in place at GitHub.
+// Attention: This option is not yet functional!
 func KeepLegacyBidi(keep bool) Option {
+	// Default behaviour should be to strip LTR and RTL legacy control characters.
+	// For security reasons applications should usually treat LTR/RTL cautiously when read
+	// in from external sources. You can find various sources on the internet discussion
+	// this problem, including a policy in place at GitHub.
 	return func(p *nestedTextParser) (err error) {
 		return nil
 	}

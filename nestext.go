@@ -31,11 +31,29 @@
 //
 // Parsing NestedText
 //
-// (TODO)
+// Parse is the top-level API:
 //
-// Example Application Usage
+//    input := `
+//    # Example for a NestedText dict
+//    a: Hello
+//    b: World
+//    `
 //
-// (TODO)
+//    result, err := Parse(strings.NewReader(input))
+//    if err != nil {
+//        log.Fatal("parsing failed")
+//    }
+//    fmt.Printf("result = %#v\n", result)
+//
+// will yield:
+//
+//     result = map[string]interface {}{"a":"Hello", "b":"World"}
+//
+// Clients may use tools like `mitchellh/mapstructure` or `knadh/koanf` for further processing.
+//
+// Encoding to NestedText
+//
+// Sub-package `ntenc` provides a NestedText encoder.
 //
 package nestext
 

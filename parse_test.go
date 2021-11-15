@@ -2,6 +2,7 @@ package nestext
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,19 @@ func TestParserStack(t *testing.T) {
 	if ok := p.stack.pushKV(&two, "two"); ok {
 		t.Fatal("pushing a key onto the stack should fail, didn't")
 	}
+}
+
+func TestSimpleDict(t *testing.T) {
+	input := `
+# Example for a dict
+a: Hello
+b: World
+`
+	result, err := Parse(strings.NewReader(input))
+	if err != nil {
+		log.Fatal("parsing failed")
+	}
+	fmt.Printf("result = %#v\n", result)
 }
 
 func TestTableParse(t *testing.T) {
