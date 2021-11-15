@@ -39,7 +39,10 @@
 //
 package nestext
 
-import "fmt"
+import (
+	"fmt"
+	"unicode"
+)
 
 // --- Error type ------------------------------------------------------------
 
@@ -143,6 +146,7 @@ type inlineTokenType int8
 
 const (
 	character inlineTokenType = iota
+	whitespace
 	newline
 	comma
 	colon
@@ -153,6 +157,7 @@ const (
 )
 
 var inlineTokenMap = map[rune]inlineTokenType{
+	' ':  whitespace,
 	'\n': newline,
 	',':  comma,
 	':':  colon,
@@ -165,6 +170,9 @@ var inlineTokenMap = map[rune]inlineTokenType{
 func inlineTokenFor(r rune) inlineTokenType {
 	if t, ok := inlineTokenMap[r]; ok {
 		return t
+	}
+	if unicode.IsSpace(r) {
+		return whitespace
 	}
 	return character
 }

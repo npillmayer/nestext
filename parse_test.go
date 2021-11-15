@@ -20,6 +20,18 @@ func TestParserUsageError(t *testing.T) {
 	}
 }
 
+func TestParserStack(t *testing.T) {
+	p := newParser()
+	p.pushNonterm(false)
+	if ok := p.stack.pushKV(nil, "one"); !ok {
+		t.Fatal("pushing a value onto the stack failed")
+	}
+	two := "2"
+	if ok := p.stack.pushKV(&two, "two"); ok {
+		t.Fatal("pushing a key onto the stack should fail, didn't")
+	}
+}
+
 func TestTableParse(t *testing.T) {
 	p := newParser()
 	t.Logf("============================================================")
@@ -27,6 +39,9 @@ func TestTableParse(t *testing.T) {
 		text    string
 		correct bool
 	}{
+		{`# strange key with :
+-:: x
+`, true},
 		{`# string
 > Hello
 > World
@@ -36,6 +51,20 @@ func TestTableParse(t *testing.T) {
 > World!
 : key
 `, false}, // extra ':' line
+		{`# inline dict with inline list
+{a: [x]}
+`, true},
+		{`# inline dict in list
+-
+  {a: 0}
+`, true},
+		{`# inline dict with comma
+{a: x, }
+`, false},
+		{`# empty dict entry
+:
+  >
+`, true},
 		{`# multi-line list item
 - Hello
 -
@@ -57,6 +86,10 @@ b: How are you?
   > Hello World!
 b: How are you?
 `, true},
+		{`# dict indent error
+- Hello
+  - World!
+`, false},
 	}
 	for i, input := range inputs {
 		buf := strings.NewReader(input.text)

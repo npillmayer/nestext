@@ -7,10 +7,11 @@ import (
 	"strings"
 )
 
-// TODO unify stack to a single type (now duplicates for top-level parser and inline-parser).
+// === Top-level API =========================================================
 
 // Parse reads a NestedText input source and outputs a resulting hierarchy of values.
 // Values are stored as strings, []interface{} or map[string]interface{} respectively.
+// The concrete resulting top-level type depends on the top-level NestedText input type.
 //
 // If a non-nil error is returned, it will be of type NestedTextError.
 //
@@ -24,7 +25,7 @@ func Parse(r io.Reader, opts ...Option) (interface{}, error) {
 	return p.Parse(r)
 }
 
-// === Parser Options ========================================================
+// --- Parser options --------------------------------------------------------
 
 // Option is a type to influence the behaviour of the parsing process.
 // Multiple options may be passed to `Parse(…)`.
@@ -71,9 +72,13 @@ func TopLevel(top string) Option {
 	}
 }
 
-// TODO
+// KeepLegacyBidi requests the parser to keep Unicode LTR and RTL markers.
+// This option is not yet functional!
 //
-// Default behaviour should be to strip LTR and RTL legacy control characters.
+// Default behaviour is to strip LTR and RTL legacy control characters.
+// For security reasons applications should usually treat LTR/RTL cautiously when read
+// in from external sources. You can find various sources on the internet discussion
+// this problem, including a policy in place at GitHub.
 func KeepLegacyBidi(keep bool) Option {
 	return func(p *nestedTextParser) (err error) {
 		return nil
@@ -82,18 +87,21 @@ func KeepLegacyBidi(keep bool) Option {
 
 // === Top level parser ======================================================
 
+// nestedTextParser is a recursive-descend parser working on a grammar on input lines.
+// The scanner is expected to return line by line wrapped into `parserToken`.
 type nestedTextParser struct {
-	sc       *scanner           // line level scanner
-	token    *parserToken       // the current token from the scanner
-	inline   *inlineItemParser  // sub-parser for inline lists/dicts
-	stack    []inlineStackEntry // result stack
-	toplevel string             // type of top-level item
+	sc       *scanner          // line level scanner
+	token    *parserToken      // the current token from the scanner
+	inline   *inlineItemParser // sub-parser for inline lists/dicts
+	toplevel string            // type of top-level item
+	stack    pstack            // parser stack
+	//stack    []parserStackEntry // result stack
 }
 
 func newParser() *nestedTextParser {
 	p := &nestedTextParser{
 		inline: newInlineParser(),
-		stack:  make([]inlineStackEntry, 0, 10),
+		stack:  make([]parserStackEntry, 0, 10),
 	}
 	return p
 }
@@ -112,22 +120,23 @@ func (p *nestedTextParser) Parse(r io.Reader) (result interface{}, err error) {
 
 func (p *nestedTextParser) parseDocument() (result interface{}, err error) {
 	// initial token from scanner is a health check for the input source
-	fmt.Println("# requesting document root from scanner")
+	//fmt.Println("# requesting document root from scanner")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
-	fmt.Printf("# document root = %s\n", p.token)
+	//fmt.Printf("# document root = %s\n", p.token)
 	if p.token.TokenType == eof || p.token.TokenType == emptyDocument {
 		return nil, nil
 	}
 	// read the first item line
-	fmt.Println("# parsers starts requesting lines")
+	//fmt.Println("# parsers starts requesting lines")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
 	result, err = p.parseAny(0)
-	fmt.Printf("final token = %s\n", p.token)
-	fmt.Printf("final line = %d\n", p.sc.Buf.CurrentLine)
+	//fmt.Printf("RESULT:\n%v\n", result)
+	//fmt.Printf("final token = %s\n", p.token)
+	//fmt.Printf("final line = %d\n", p.sc.Buf.CurrentLine)
 	if err == nil && p.token.TokenType != eof { // TODO this test is not sufficient
 		err = makeParsingError(p.token, ErrCodeFormat,
 			"unused content following valid input")
@@ -136,20 +145,32 @@ func (p *nestedTextParser) parseDocument() (result interface{}, err error) {
 }
 
 func (p *nestedTextParser) parseAny(indent int) (result interface{}, err error) {
-	fmt.Printf("# parseAny(%d)\n", indent)
+	//fmt.Printf("# parseAny(%d)\n", indent)
 	if p.token.Indent < indent {
-		fmt.Println("# <-outdent")
+		//fmt.Println("# <-outdent")
 		return nil, nil
 	}
 	switch p.token.TokenType {
 	case stringMultiline:
 		result, err = p.parseMultiString(p.token.Indent)
 	case inlineList:
+		p.inline.LineNo = p.token.LineNo
 		result, err = p.inline.parse(_S2, p.token.Content[0])
-		fmt.Printf("sub list = %v\n", result)
+		//fmt.Printf("sub list = %v\n", result)
+		if err == nil {
+			if p.token = p.sc.NextToken(); p.token.Error != nil {
+				return nil, p.token.Error
+			}
+		}
 	case inlineDict:
+		p.inline.LineNo = p.token.LineNo
 		result, err = p.inline.parse(_S1, p.token.Content[0])
-		fmt.Printf("sub dict = %v\n", result)
+		//fmt.Printf("sub dict = %v\n", result)
+		if err == nil {
+			if p.token = p.sc.NextToken(); p.token.Error != nil {
+				return nil, p.token.Error
+			}
+		}
 	case listItem, listItemMultiline:
 		result, err = p.parseList(indent)
 	case inlineDictKeyValue, inlineDictKey, dictKeyMultiline:
@@ -161,19 +182,19 @@ func (p *nestedTextParser) parseAny(indent int) (result interface{}, err error) 
 }
 
 func (p *nestedTextParser) parseList(indent int) (result interface{}, err error) {
-	fmt.Printf("# parseList(%d)\n", indent)
+	//fmt.Printf("# parseList(%d)\n", indent)
 	p.pushNonterm(false)
 	_, err = p.parseListItems(p.token.Indent)
 	if err != nil {
 		return nil, err
 	}
-	result, err = p.tos().ReduceToItem()
-	p.pop()
+	result, err = p.stack.tos().ReduceToItem()
+	p.stack.pop()
 	return
 }
 
 func (p *nestedTextParser) parseListItems(indent int) (result interface{}, err error) {
-	fmt.Printf("# parseListItems(%d)\n", indent)
+	//fmt.Printf("# parseListItems(%d)\n", indent)
 	var value interface{}
 	for p.token.TokenType == listItem || p.token.TokenType == listItemMultiline {
 		if p.token.TokenType == listItem {
@@ -182,33 +203,41 @@ func (p *nestedTextParser) parseListItems(indent int) (result interface{}, err e
 			value, err = p.parseListItemMultiline(indent)
 		}
 		if value != nil && err == nil {
-			p.push(nil, value)
+			p.stack.pushKV(nil, value)
+		} else if err != nil {
+			return
+		} else if value == nil {
+			break
 		}
 	}
-	fmt.Printf("# <-- parseListItems\n")
-	return p.tos().Values, err
+	//fmt.Printf("# <-- parseListItems\n")
+	return p.stack.tos().Values, err
 }
 
 func (p *nestedTextParser) parseListItem(indent int) (result interface{}, err error) {
-	fmt.Printf("# parseListItem(%d)\n", indent)
-	if p.token.Indent != indent {
+	//fmt.Printf("# parseListItem(%d)\n", indent)
+	if p.token.Indent > indent {
+		return nil, MakeNestedTextError(ErrCodeFormat,
+			"invalid indent: may only follow an item that does not already have a value")
+	}
+	if p.token.Indent < indent {
 		return nil, nil
 	}
 	value := p.token.Content[0]
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
-	fmt.Printf("# <-- parseListItem\n")
+	//fmt.Printf("# <-- parseListItem\n")
 	return value, err
 }
 
 func (p *nestedTextParser) parseListItemMultiline(indent int) (result interface{}, err error) {
-	fmt.Printf("# --> parseListItemMultiline(%d)..", indent)
+	//fmt.Printf("# --> parseListItemMultiline(%d)..", indent)
 	if p.token.Indent != indent {
-		fmt.Printf(".X\n")
+		//fmt.Printf(".X\n")
 		return nil, nil
 	}
-	fmt.Printf(".go\n")
+	//fmt.Printf(".go\n")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
@@ -216,29 +245,37 @@ func (p *nestedTextParser) parseListItemMultiline(indent int) (result interface{
 		return "", nil
 	}
 	result, err = p.parseAny(p.token.Indent)
-	fmt.Println("# <-- parseListItemMultiline")
+	if p.token.Indent > indent {
+		return nil, MakeNestedTextError(ErrCodeFormat,
+			"invalid indent: may only follow an item that does not already have a value")
+	}
+	//fmt.Println("# <-- parseListItemMultiline")
 	return
 }
 
 func (p *nestedTextParser) parseDict(indent int) (result interface{}, err error) {
-	fmt.Printf("# parseDict(%d)\n", indent)
+	//fmt.Printf("# parseDict(%d)\n", indent)
 	p.pushNonterm(true)
 	_, err = p.parseDictKeyValuePairs(p.token.Indent)
 	if err != nil {
 		return nil, err
 	}
-	result, err = p.tos().ReduceToItem()
-	p.pop()
+	result, err = p.stack.tos().ReduceToItem()
+	p.stack.pop()
+	if p.token.Indent > indent {
+		err = MakeNestedTextError(ErrCodeFormat, "partial dedent")
+	}
 	return
 }
 
+// keyValuePair is a helper type to hold dict key-values as return-type.
 type keyValuePair struct {
 	key   *string
 	value interface{}
 }
 
 func (p *nestedTextParser) parseDictKeyValuePairs(indent int) (result interface{}, err error) {
-	fmt.Printf("# parseDictKeyValuePairs(%d)\n", indent)
+	//fmt.Printf("# parseDictKeyValuePairs(%d)\n", indent)
 	var kv keyValuePair
 	for p.token.TokenType == inlineDictKeyValue || p.token.TokenType == inlineDictKey ||
 		p.token.TokenType == dictKeyMultiline {
@@ -252,40 +289,41 @@ func (p *nestedTextParser) parseDictKeyValuePairs(indent int) (result interface{
 			kv, err = p.parseDictKeyValuePairWithMultilineKey(indent)
 		}
 		if kv.value != nil {
-			if err == nil {
-				p.push(kv.key, kv.value)
+			if err != nil {
+				return
 			}
+			p.stack.pushKV(kv.key, kv.value)
 		} else {
 			break
 		}
 	}
-	fmt.Println("# <-- parseDictKeyValuePairs")
-	return p.tos().Keys, err
+	//fmt.Println("# <-- parseDictKeyValuePairs")
+	return p.stack.tos().Keys, err
 }
 
 func (p *nestedTextParser) parseDictKeyValuePair(indent int) (kv keyValuePair, err error) {
-	fmt.Printf("# parseDictKeyValuePair(%d)..", indent)
+	//fmt.Printf("# parseDictKeyValuePair(%d)..", indent)
 	if p.token.Indent != indent {
-		fmt.Printf(".X\n")
+		//fmt.Printf(".X\n")
 		return
 	}
-	fmt.Printf(".go\n")
+	//fmt.Printf(".go\n")
 	key := p.token.Content[0]
 	value := p.token.Content[1]
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return kv, p.token.Error
 	}
-	fmt.Println("# <-- parseDictKeyValuePair")
+	//fmt.Println("# <-- parseDictKeyValuePair")
 	return keyValuePair{key: &key, value: value}, err
 }
 
 func (p *nestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair, err error) {
-	fmt.Printf("# parseDictAnyKeyValuePair(%d)..", indent)
+	//fmt.Printf("# parseDictAnyKeyValuePair(%d)..", indent)
 	if p.token.Indent != indent {
-		fmt.Printf(".X\n")
+		//fmt.Printf(".X\n")
 		return
 	}
-	fmt.Printf(".go\n")
+	//fmt.Printf(".go\n")
 	kv.key = &p.token.Content[0]
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return kv, p.token.Error
@@ -295,19 +333,28 @@ func (p *nestedTextParser) parseDictKeyAnyValuePair(indent int) (kv keyValuePair
 		return
 	}
 	kv.value, err = p.parseAny(p.token.Indent)
-	fmt.Println("# <-- parseDictAnyKeyValuePair")
+	//fmt.Println("# <-- parseDictAnyKeyValuePair")
 	return
 }
 
+func allowVoid(val []string, i int) string {
+	if val == nil || len(val) <= i {
+		return ""
+	}
+	return val[i]
+}
+
 func (p *nestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv keyValuePair, err error) {
-	fmt.Printf("# --> parseDictKeyValuePairWithMultilineKey(%d)\n", indent)
+	//fmt.Printf("# --> parseDictKeyValuePairWithMultilineKey(%d)\n", indent)
 	if p.token.Indent != indent {
-		fmt.Printf(".X\n")
+		//fmt.Printf(".X\n")
 		return
 	}
-	fmt.Printf(".go\n")
+	//fmt.Printf(".go\n")
+	//fmt.Printf("token         = %q\n", p.token.String())
+	//fmt.Printf("token.Content = %#v\n", p.token.Content)
 	builder := strings.Builder{}
-	builder.WriteString(p.token.Content[0])
+	builder.WriteString(allowVoid(p.token.Content, 0))
 	for err == nil {
 		p.token = p.sc.NextToken()
 		if p.token.Error != nil {
@@ -317,7 +364,7 @@ func (p *nestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv
 			break
 		}
 		builder.WriteRune('\n')
-		builder.WriteString(p.token.Content[0])
+		builder.WriteString(allowVoid(p.token.Content, 0))
 	}
 	key := builder.String()
 	kv.key = &key
@@ -325,56 +372,57 @@ func (p *nestedTextParser) parseDictKeyValuePairWithMultilineKey(indent int) (kv
 		return keyValuePair{key: &key, value: ""}, nil
 	}
 	kv.value, err = p.parseAny(p.token.Indent)
-	fmt.Println("# <-- parseDictKeyValuePairWithMultilineKey")
+	//fmt.Println("# <-- parseDictKeyValuePairWithMultilineKey")
 	return
 }
 
 func (p *nestedTextParser) parseMultiString(indent int) (result interface{}, err error) {
-	fmt.Printf("# --> parseMultiString(%d)..", indent)
+	//fmt.Printf("# --> parseMultiString(%d)..", indent)
 	if p.token.Indent != indent {
-		fmt.Printf(".X\n")
+		//fmt.Printf(".X\n")
 		return nil, nil
 	}
-	fmt.Printf(".go\n")
+	//fmt.Printf(".go\n")
 	builder := strings.Builder{}
-	builder.WriteString(p.token.Content[0])
+	builder.WriteString(allowVoid(p.token.Content, 0))
 	for err == nil {
 		p.token = p.sc.NextToken()
 		if p.token.Error != nil {
-			fmt.Printf("### err = %s\n", p.token.Error)
+			//fmt.Printf("### err = %s\n", p.token.Error)
 			return builder.String(), p.token.Error
 		}
 		if p.token.TokenType != stringMultiline || p.token.Indent != indent {
-			fmt.Printf("# stop string at %s\n", p.token)
+			//fmt.Printf("# stop string at %s\n", p.token)
 			break
 		}
 		builder.WriteRune('\n')
-		builder.WriteString(p.token.Content[0])
-		fmt.Printf("# string.append %q\n", p.token.Content[0])
+		builder.WriteString(allowVoid(p.token.Content, 0))
+		//fmt.Printf("# string.append %q\n", p.token.Content[0])
 	}
-	fmt.Printf("### eof = %v, err = %v\n", p.sc.Buf.IsEof(), err)
-	fmt.Println("# <-- parseMultiString")
+	//fmt.Printf("### eof = %v, err = %v\n", p.sc.Buf.IsEof(), err)
+	//fmt.Println("# <-- parseMultiString")
 	return builder.String(), nil
 }
 
 func (p *nestedTextParser) pushNonterm(isDict bool) {
-	entry := inlineStackEntry{
+	entry := parserStackEntry{
 		Values: make([]interface{}, 0, 16),
 	}
 	if isDict { // dict
 		entry.Keys = make([]string, 0, 16)
 	}
-	p.stack = append(p.stack, entry)
+	p.stack.push(&entry)
 }
 
-func (p *nestedTextParser) tos() *inlineStackEntry {
+/*
+func (p *nestedTextParser) tos() *parserStackEntry {
 	if len(p.stack) > 0 {
 		return &p.stack[len(p.stack)-1]
 	}
 	return nil
 }
 
-func (p *nestedTextParser) pop() (tos *inlineStackEntry) {
+func (p *nestedTextParser) pop() (tos *parserStackEntry) {
 	if len(p.stack) > 0 {
 		tos = p.tos()
 		p.stack = p.stack[:len(p.stack)-1]
@@ -383,15 +431,15 @@ func (p *nestedTextParser) pop() (tos *inlineStackEntry) {
 }
 
 func (p *nestedTextParser) push(s *string, val interface{}) bool {
-	if val != nil {
-		var key string
-		if s == nil {
-			key = "<nil>"
-		} else {
-			key = *s
-		}
-		fmt.Printf("# push( %q , %#v )\n", key, val)
-	}
+	// if val != nil {
+	// 	var key string
+	// 	if s == nil {
+	// 		key = "<nil>"
+	// 	} else {
+	// 		key = *s
+	// 	}
+	// 	//fmt.Printf("# push( %q , %#v )\n", key, val)
+	// }
 	tos := &p.stack[len(p.stack)-1]
 	tos.Values = append(tos.Values, val)
 	if s != nil {
@@ -399,6 +447,7 @@ func (p *nestedTextParser) push(s *string, val interface{}) bool {
 	}
 	return true
 }
+*/
 
 // wrapResult wraps the result according to the TopLevel option.
 func (p *nestedTextParser) wrapResult(result interface{}) interface{} {
@@ -426,7 +475,7 @@ func (p *nestedTextParser) wrapResult(result interface{}) interface{} {
 }
 
 // === Inline item parser ====================================================
-//
+
 // Inline items are lists or dicts as one-liners. Examples would be
 //
 //     [ one, two three ]
@@ -448,17 +497,19 @@ func (p *nestedTextParser) wrapResult(result interface{}) interface{} {
 // is popped. The result is appended to the newly uncovered TOS.
 //
 type inlineItemParser struct {
-	Text         string             // current line of NestedText
-	TextPosition int                // position of reader in string
-	Marker       int                // positional marker for start of key or value
-	Input        *strings.Reader    // reader for Text
-	stack        []inlineStackEntry // parse stack
+	Text         string          // current line of NestedText
+	TextPosition int             // position of reader in string
+	Marker       int             // positional marker for start of key or value
+	Input        *strings.Reader // reader for Text
+	LineNo       int             // current input line number
+	stack        pstack          // parser stack
+	//stack        []parserStackEntry // parse stack
 }
 
 // newInlineParser creates a fresh inline parser instance.
 func newInlineParser() *inlineItemParser {
 	return &inlineItemParser{
-		stack: make([]inlineStackEntry, 0, 10),
+		stack: make([]parserStackEntry, 0, 10),
 	}
 }
 
@@ -478,43 +529,47 @@ func (p *inlineItemParser) parse(initial inlineParserState, input string) (resul
 		}
 		chType := inlineTokenFor(ch)
 		oldState, state = state, inlineStateMachine[state][chType]
-		fmt.Printf("state = %d, |stack| = %d\n", state, len(p.stack))
+		//fmt.Printf("state = %d, |stack| = %d\n", state, len(p.stack))
+		//fmt.Printf("%d => %d  for r=%#U\n", oldState, state, ch)
 		if isErrorState(state) {
 			break
 		} else if isNonterm(state) {
 			nonterm := state
 			p.pushNonterm(state)
 			state = inlineStateMachine[state][chType]
-			fmt.Printf(". encountered non-terminal %d\n", nonterm)
-			p.tos().NontermState = inlineStateMachine[oldState][_S(nonterm)]
-			fmt.Printf(". jumping to %d\n", state)
-			fmt.Printf(". will drop back to %d\n", p.tos().NontermState)
+			//fmt.Printf(". encountered non-terminal %d\n", nonterm)
+			p.stack.tos().NontermState = inlineStateMachine[oldState][_S(nonterm)]
+			//fmt.Printf(". jumping to %d\n", state)
+			//fmt.Printf(". will drop back to %d\n", p.tos().NontermState)
 		}
 		ok := inlineStateMachineActions[state](p, oldState, state, ch, w)
-		fmt.Printf("> action for state %d => %v\n", state, ok)
+		//fmt.Printf("> action for state %d => %v\n", state, ok)
 		if !ok {
 			state = e // flag error by setting error state
 			break
 		}
 		if isAccept(state) {
-			fmt.Printf(". accept %d\n", state)
-			result, err = p.tos().ReduceToItem()
+			//fmt.Printf(". accept %d\n", state)
+			result, err = p.stack.tos().ReduceToItem()
 			if err != nil {
-				p.tos().Error = err
+				p.stack.tos().Error = err
 				state = e
 				break
 			}
-			state = p.tos().NontermState
-			fmt.Printf(". continue after non-term at %d\n", state)
-			p.pop()
+			state = p.stack.tos().NontermState
+			//fmt.Printf(". continue after non-term at %d\n", state)
+			p.stack.pop()
 			if len(p.stack) > 0 {
-				p.push(p.tos().Key, result)
+				p.stack.pushKV(p.stack.tos().Key, result)
 			}
 		}
 		p.TextPosition += w
 	}
 	if isErrorState(state) {
-		err = p.stack[len(p.stack)-1].Error
+		if err = p.stack[len(p.stack)-1].Error; err == nil {
+			t := parserToken{ColNo: p.TextPosition, LineNo: p.LineNo}
+			err = makeParsingError(&t, ErrCodeFormat, "format error")
+		}
 	}
 	return
 }
@@ -523,71 +578,14 @@ func (p *inlineItemParser) parse(initial inlineParserState, input string) (resul
 // the non-terminal represents a list item or a dict item, the .Keys slice will be initialized.
 // This function will be called for every non-terminal encounterd during the parse run, i.e.,
 // for the initial non-terminal as well as for every nested one.
-//
 func (p *inlineItemParser) pushNonterm(state inlineParserState) {
-	entry := inlineStackEntry{
+	entry := parserStackEntry{
 		Values: make([]interface{}, 0, 16),
 	}
 	if state == _S1 { // dict
 		entry.Keys = make([]string, 0, 16)
 	}
-	p.stack = append(p.stack, entry)
-}
-
-// The inline parser manages a stack, with a stack entry for every non-terminal. The bottom
-// stack entry represents the outermost item. Each successive nested item will trigger a
-// stack-enty to be pushed onto the parser stack.
-// Stack entries collect the information for an item, either a list or a dict.
-type inlineStackEntry struct {
-	Values       []interface{}     // list of values, either list items or dict values
-	Keys         []string          // list of keys, empty for list items
-	Key          *string           // current key to set value for, if in a dict
-	Error        error             // if error occured: remember it
-	NontermState inlineParserState // sub-nonterm, or 0 for root entry
-}
-
-func (p *inlineItemParser) tos() *inlineStackEntry {
-	if len(p.stack) > 0 {
-		return &p.stack[len(p.stack)-1]
-	}
-	return nil
-}
-
-func (p *inlineItemParser) pop() (tos *inlineStackEntry) {
-	if len(p.stack) > 0 {
-		tos = p.tos()
-		p.stack = p.stack[:len(p.stack)-1]
-	}
-	return tos
-}
-
-func (p *inlineItemParser) push(s *string, val interface{}) bool {
-	if val != nil {
-		fmt.Printf("# push( %#v )\n", val)
-	}
-	tos := &p.stack[len(p.stack)-1]
-	tos.Values = append(tos.Values, val)
-	if s != nil {
-		tos.Keys = append(tos.Keys, *s)
-	}
-	return true
-}
-
-func (entry inlineStackEntry) ReduceToItem() (interface{}, error) {
-	if entry.Keys == nil {
-		fmt.Printf("# reduce to %+v of type %T\n", entry.Values, entry.Values)
-		return entry.Values, nil
-	}
-	dict := make(map[string]interface{}, len(entry.Values))
-	if len(entry.Keys) > 0 && len(entry.Values) != len(entry.Keys) {
-		// error: mixed content
-		panic("mixed content")
-	}
-	for i, key := range entry.Keys {
-		dict[key] = entry.Values[i]
-	}
-	fmt.Printf("# reduce to %v of type %T\n", dict, dict)
-	return dict, nil
+	p.stack.push(&entry)
 }
 
 // --- Inline parser table ---------------------------------------------------
@@ -599,10 +597,10 @@ type inlineParserState int8
 // For a diagram of the automata, please refer to automata.dot.
 // States 1..9 are unnamed.
 const e inlineParserState = -1   // error state
-const _S1 inlineParserState = 10 // non-terminal S1
-const _S2 inlineParserState = 11 // non-terminal S2
-const _A1 inlineParserState = 12 // acceptance state A1
-const _A2 inlineParserState = 13 // acceptance state A2
+const _S1 inlineParserState = 11 // non-terminal S1
+const _S2 inlineParserState = 12 // non-terminal S2
+const _A1 inlineParserState = 13 // acceptance state A1
+const _A2 inlineParserState = 14 // acceptance state A2
 
 // isErrorState is a predicate on parser states.
 func isErrorState(state inlineParserState) bool {
@@ -623,28 +621,29 @@ func isAccept(state inlineParserState) bool {
 // "ghost state" (dashed line in the automata.dot diagram) which follows the
 // acceptance of a nested non-terminal.
 func isGhost(state inlineParserState) bool {
-	return state == 5 || state == 9
+	return state == 5 || state == 10
 }
 
-const chClassCnt = 10
+const chClassCnt = 11
 
 // Character classes:
-//   A  \n ,  :  [  ]  {  }  _S(S1) _S(S2)
+//   A  ws \n ,  :  [  ]  {  }  _S(S1) _S(S2)
 var inlineStateMachine = [...][chClassCnt]inlineParserState{
-	{e, e, e, e, 7, e, 1, e, e, e},       // state 0, initial
-	{2, e, e, 3, e, e, e, _A1, e, e},     // state 1
-	{2, e, e, 3, e, e, e, e, e, e},       // state 2
-	{4, e, 6, e, _S2, e, _S1, _A1, 5, 5}, // state 3
-	{4, e, 6, e, e, e, e, _A1, e, e},     // state 4
-	{e, e, 6, e, e, e, e, _A1, e, e},     // state 5
-	{2, e, e, 3, e, e, e, _A1, e, e},     // state 6
-	{8, e, 7, 8, _S2, _A2, _S1, e, 9, 9}, // state 7
-	{8, e, 7, 8, e, _A2, e, e, e, e},     // state 8
-	{e, e, 7, e, e, _A2, e, e, e, e},     // state 9
-	{e, e, e, e, e, e, 1, e, e, e},       // state S1
-	{e, e, e, e, 7, e, e, e, e, e},       // state S2
-	{e, e, e, e, e, e, e, e, e, e},       // state A1
-	{e, e, e, e, e, e, e, e, e, e},       // state A2
+	{e, e, e, e, e, 7, e, 1, e, e, e},         // state 0, initial
+	{2, 2, e, e, 3, e, e, e, _A1, e, e},       // state 1
+	{2, 2, e, e, 3, e, e, e, e, e, e},         // state 2
+	{4, 3, e, 6, e, _S2, e, _S1, _A1, 5, 5},   // state 3
+	{4, 4, e, 6, e, e, e, e, _A1, e, e},       // state 4
+	{e, 5, e, 6, e, e, e, e, _A1, e, e},       // state 5
+	{2, 6, e, e, 3, e, e, e, e, e, e},         // state 6
+	{9, 8, e, 7, 9, _S2, _A2, _S1, e, 10, 10}, // state 7
+	{9, 8, e, 7, 9, _S2, _A2, _S1, e, 10, 10}, // state 8
+	{9, 9, e, 7, 9, e, _A2, e, e, e, e},       // state 9
+	{e, 10, e, 7, e, e, _A2, e, e, e, e},      // state 10
+	{e, e, e, e, e, e, e, 1, e, e, e},         // state S1
+	{e, e, e, e, e, 7, e, e, e, e, e},         // state S2
+	{e, e, e, e, e, e, e, e, e, e, e},         // state A1
+	{e, e, e, e, e, e, e, e, e, e, e},         // state A2
 }
 
 // _S returns a non-terminal state as a pseudo character class.
@@ -659,27 +658,31 @@ var inlineStateMachineActions = [...]func(p *inlineItemParser,
 	nop, // 0
 	func(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool { // 1
 		p.Marker = p.TextPosition + w // get ready for first key
-		fmt.Printf("- Marker for key at %d\n", p.Marker)
+		//fmt.Printf("- Marker for key at %d\n", p.Marker)
 		return true
 	},
 	nop, // 2
 	func(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool { // 3
-		key := p.Text[p.Marker:p.TextPosition]
-		key = strings.TrimSpace(key)
-		p.tos().Key = &key
-		p.Marker = p.TextPosition + w // get ready for value
-		fmt.Printf("- Marker for value at %d\n", p.Marker)
+		if from != 3 {
+			key := p.Text[p.Marker:p.TextPosition]
+			key = strings.TrimSpace(key)
+			p.stack.tos().Key = &key
+			//fmt.Printf("- Marker for value at %d\n", p.Marker)
+			p.Marker = p.TextPosition + w // get ready for value
+		}
 		return true
 	},
 	nop, // 4
 	nop, // 5
 	func(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool { // 6
-		if p.Marker > 0 && !isGhost(from) {
-			p.appendStringValue(false)
+		if from != 6 {
+			if p.Marker > 0 && !isGhost(from) {
+				p.appendStringValue(false)
+			}
+			p.stack.tos().Key = nil
+			p.Marker = p.TextPosition + w // get ready for next key
+			//fmt.Printf("- Marker for key at %d\n", p.Marker)
 		}
-		p.tos().Key = nil
-		p.Marker = p.TextPosition + w // get ready for next key
-		fmt.Printf("- Marker for key at %d\n", p.Marker)
 		return true
 	},
 	func(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool { // 7
@@ -687,13 +690,24 @@ var inlineStateMachineActions = [...]func(p *inlineItemParser,
 			p.appendStringValue(false)
 		}
 		p.Marker = p.TextPosition + w // get ready for next item
-		fmt.Printf("- Marker for item at %d\n", p.Marker)
+		//fmt.Printf("- Marker for item at %d\n", p.Marker)
 		return true
 	},
-	nop,    // 8
-	nop,    // 9
-	nop,    // S1
-	nop,    // S2
+	nop, // 8
+	nop, // 9
+	nop, // 10
+	func(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool { // S1
+		if from == 3 || from == 8 {
+			p.Marker = 0
+		}
+		return true
+	},
+	func(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool { // S2
+		if from == 3 || from == 8 {
+			p.Marker = 0
+		}
+		return true
+	},
 	accept, // A1
 	accept, // A2
 }
@@ -711,9 +725,9 @@ func (p *inlineItemParser) appendStringValue(isAccept bool) {
 	// multiple values, no white space is required to represent an empty string
 	// Thus, [] represents an empty list, [ ] a list with a single empty string value,
 	// and [,] a list with two empty string values.
-	if !isAccept || len(value) > 0 || len(p.tos().Values) > 0 {
+	if !isAccept || len(value) > 0 || len(p.stack.tos().Values) > 0 {
 		value = strings.TrimSpace(value)
-		p.push(p.tos().Key, value)
+		p.stack.pushKV(p.stack.tos().Key, value)
 	}
 }
 
@@ -722,14 +736,132 @@ func nop(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool {
 	return true
 }
 
-func parserError(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool {
+// parserError always returns false
+/* func parserError(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool {
 	return false
-}
+} */
 
 func accept(p *inlineItemParser, from, to inlineParserState, ch rune, w int) bool {
-	fmt.Println("ACCEPT")
+	//fmt.Println("ACCEPT")
 	if p.Marker > 0 && !isGhost(from) {
 		p.appendStringValue(true)
 	}
 	return true
+}
+
+// === Parser stack ==========================================================
+
+// The parser manages a stack, with a stack entry for every non-terminal. The bottom
+// stack entry represents the outermost item. Each successive nested item will trigger a
+// stack-enty to be pushed onto the parser stack.
+// Stack entries collect the information for an item, either a list or a dict.
+
+type pstack []parserStackEntry // parse stack = slice of stack entries
+
+func (s pstack) tos() *parserStackEntry {
+	if len(s) > 0 {
+		return &s[len(s)-1]
+	}
+	return nil
+}
+
+func (s *pstack) pop() (tos *parserStackEntry) {
+	if len(*s) > 0 {
+		tos = s.tos()
+		*s = (*s)[:len(*s)-1]
+	}
+	return tos
+}
+
+func (s *pstack) push(e *parserStackEntry) (tos *parserStackEntry) {
+	if len(*s) > 0 {
+		tos = s.tos()
+	}
+	*s = append(*s, *e)
+	return tos
+}
+
+// pushKV will push a value and an option key onto the stack by appending it to the
+// top-most stack entry.
+// The containing stack-entry has to be provided by a non-term (pushNonterm).
+func (s *pstack) pushKV(str *string, val interface{}) bool {
+	// if val != nil && str != nil {
+	// 	fmt.Printf("# push( %s, %#v )\n", *str, val)
+	// } else if val != nil {
+	// 	fmt.Printf("# push( %#v )\n", val)
+	// }
+	if s == nil || len(*s) == 0 {
+		panic("use of un-initialized parser stack")
+	}
+	tos := &(*s)[len(*s)-1]
+	tos.Values = append(tos.Values, val)
+	if str != nil {
+		if tos.Keys == nil {
+			//panic("top-most stack entry should not contain keys")
+			return false
+		}
+		tos.Keys = append(tos.Keys, *str)
+	}
+	return true
+}
+
+// The parser manages a stack, with a stack entry for every non-terminal. The bottom
+// stack entry represents the outermost item. Each successive nested item will trigger a
+// stack-enty to be pushed onto the parser stack.
+// Stack entries collect the information for an item, either a list or a dict.
+type parserStackEntry struct {
+	Values       []interface{}     // list of values, either list items or dict values
+	Keys         []string          // list of keys, empty for list items
+	Key          *string           // current key to set value for, if in a dict
+	Error        error             // if error occured: remember it
+	NontermState inlineParserState // sub-nonterm, or 0 for root entry (used for inline-parser only)
+}
+
+/*
+func (p *inlineItemParser) tos() *parserStackEntry {
+	if len(p.stack) > 0 {
+		return &p.stack[len(p.stack)-1]
+	}
+	return nil
+}
+
+func (p *inlineItemParser) pop() (tos *parserStackEntry) {
+	if len(p.stack) > 0 {
+		tos = p.tos()
+		p.stack = p.stack[:len(p.stack)-1]
+	}
+	return tos
+}
+
+func (p *inlineItemParser) push(s *string, val interface{}) bool {
+	//if val != nil {
+	//	fmt.Printf("# push( %#v )\n", val)
+	//}
+	tos := &p.stack[len(p.stack)-1]
+	tos.Values = append(tos.Values, val)
+	if s != nil {
+		tos.Keys = append(tos.Keys, *s)
+	}
+	return true
+}
+*/
+
+func (entry parserStackEntry) ReduceToItem() (interface{}, error) {
+	if entry.Keys == nil {
+		//fmt.Printf("# reduce to %+v of type %T\n", entry.Values, entry.Values)
+		return entry.Values, nil
+	}
+	dict := make(map[string]interface{}, len(entry.Values))
+	if len(entry.Keys) > 0 && len(entry.Values) != len(entry.Keys) {
+		// error: mixed content = uneven count of keys and values
+		// fmt.Printf("@ entry.keys   = %#v\n", entry.Keys)
+		// fmt.Printf("@ entry.values = %#v\n", entry.Values)
+		panic(fmt.Sprintf("mixed item: number of keys (%d) not equal to number of values (%d)",
+			len(entry.Keys), len(entry.Values)))
+	}
+	for i, key := range entry.Keys {
+		dict[key] = entry.Values[i]
+	}
+	//fmt.Printf("# reduce to %v of type %T\n", dict, dict)
+	return dict, nil
 }

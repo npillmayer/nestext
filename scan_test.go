@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestLineBufferSplitter(t *testing.T) {
+	inputDoc := strings.NewReader("Hello\nWorld\r?!\n")
+	buf := newLineBuffer(inputDoc)
+	buf.AdvanceCursor()
+	r := buf.ReadLineRemainder()
+	t.Logf("line: %q\n", r)
+	if r != "ello" {
+		t.Errorf("first line terminated by '\\n' not recognized?")
+	}
+	buf.AdvanceCursor()
+	r = buf.ReadLineRemainder()
+	t.Logf("line: %q\n", r)
+	if r != "orld" {
+		t.Errorf("second line terminated by '\\r' not recognized?")
+	}
+	buf.AdvanceCursor()
+	r = buf.ReadLineRemainder()
+	t.Logf("line: %q\n", r)
+	if r != "!" {
+		t.Errorf("last line terminated by '\\n' not recognized?")
+	}
+}
+
 func TestLineBufferRemainder(t *testing.T) {
 	inputDoc := strings.NewReader("Hello World\nHow are you?")
 	buf := newLineBuffer(inputDoc)

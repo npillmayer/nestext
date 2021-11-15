@@ -3,7 +3,6 @@ package nestext
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -29,6 +28,27 @@ var errAtEof error = errors.New("EOF")
 
 func newLineBuffer(inputDoc io.Reader) *lineBuffer {
 	input := bufio.NewScanner(inputDoc)
+	// From the spec:
+	// Line breaks: A NestedText document is partitioned into lines where the lines are split by
+	// CR LF, CR, or LF where CR and LF are the ASCII carriage return and line feed characters.
+	// A single document may employ any or all of these ways of splitting lines.
+	split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		advance, token, err = bufio.ScanLines(data, atEOF)
+		for i, ch := range data {
+			if ch == '\r' {
+				if i < len(data)-1 && i < len(token) {
+					if data[i+1] != '\n' {
+						advance = i + 1
+						token = data[:i]
+						err = nil
+						return
+					}
+				}
+			}
+		}
+		return
+	}
+	input.Split(split)
 	buf := &lineBuffer{Input: input}
 	err := buf.AdvanceLine()
 	if err != errAtEof {
@@ -38,7 +58,6 @@ func newLineBuffer(inputDoc io.Reader) *lineBuffer {
 }
 
 func (buf *lineBuffer) IsEof() bool {
-	//return buf.isEof && buf.ByteCursor >= buf.Line.Size()
 	return buf.isEof >= 2 || buf.Line.Size() == 0
 }
 
@@ -82,30 +101,30 @@ func (buf *lineBuffer) readRune() (rune, error) {
 // Line-count and cursor are updated.
 //
 func (buf *lineBuffer) AdvanceLine() error {
-	fmt.Printf("===> advance line..")
+	//fmt.Printf("===> advance line..")
 	buf.Cursor = 0
 	buf.ByteCursor = 0
 	// iterate over the lines of the input document until valid line found or EOF
 	if buf.isEof == 1 {
 		buf.isEof = 2
-		fmt.Printf("..1->2")
+		//fmt.Printf("..1->2")
 		return errAtEof
 	}
-	fmt.Printf("..ok\n")
+	//fmt.Printf("..ok\n")
 	for buf.isEof == 0 {
 		buf.CurrentLine++
-		fmt.Printf("===> reading line #%d\n", buf.CurrentLine)
+		//fmt.Printf("===> reading line #%d\n", buf.CurrentLine)
 		if !buf.Input.Scan() { // could not read a new line: either I/O-error or EOF
 			if err := buf.Input.Err(); err != nil {
 				return WrapError(ErrCodeIO, "I/O error while reading input", err)
 			}
-			fmt.Println("===> EOF !")
+			//fmt.Println("===> EOF !")
 			buf.isEof = 1
 			buf.Line = strings.NewReader("")
 			return errAtEof
 		}
 		buf.Text = buf.Input.Text()
-		fmt.Printf("===> %q\n", buf.Text)
+		//fmt.Printf("===> %q\n", buf.Text)
 		if !buf.IsIgnoredLine() {
 			buf.Line = strings.NewReader(buf.Text)
 			break

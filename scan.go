@@ -73,11 +73,11 @@ func (sc *scanner) NextToken() *parserToken {
 			break
 		}
 		if sc.Buf.Line.Size() == 0 {
-			fmt.Printf("===> line empty\n")
+			//fmt.Printf("===> line empty\n")
 			break
 		}
 	}
-	fmt.Printf("# new %s\n", token)
+	//fmt.Printf("# new %s\n", token)
 	return token
 }
 
@@ -135,15 +135,33 @@ func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) 
 	case '-': // list value, either single-line or multi-line. From the spec:
 		// If the first non-space character on a line is a dash followed immediately by a space (-␣) or
 		// a line break, the line is a list item.
-		return sc.recognizeItemTag('-', listItem, listItemMultiline, token), nil
+		sc.Buf.match(singleRune('-'))
+		switch sc.Buf.Lookahead {
+		case ' ', '\n': // yes, this is a valid list tag
+			return sc.recognizeItemTag('-', listItem, listItemMultiline, token), nil
+		default: // rare case: '-' as start of a dict key
+			return token, sc.ScanInlineKey
+		}
 	case '>': // multi-line string. From the spec:
 		// If the first non-space character on a line is a greater-than symbol followed immediately by
 		// a space (>␣) or a line break, the line is a string item.
-		return sc.recognizeItemTag('>', stringMultiline, stringMultiline, token), nil
+		sc.Buf.match(singleRune('>'))
+		switch sc.Buf.Lookahead {
+		case ' ', '\n': // yes, this is a valid string tag
+			return sc.recognizeItemTag('>', stringMultiline, stringMultiline, token), nil
+		default: // rare case: '>' as start of a dict key
+			return token, sc.ScanInlineKey
+		}
 	case ':': // multi-line key. From the spec:
 		// If the first non-space character on a line is a colon followed immediately by a space (:␣) or
 		// a line break, the line is a key item.
-		return sc.recognizeItemTag(':', dictKeyMultiline, dictKeyMultiline, token), nil
+		sc.Buf.match(singleRune(':'))
+		switch sc.Buf.Lookahead {
+		case ' ', '\n': // yes, this is a valid dict-key tag
+			return sc.recognizeItemTag(':', dictKeyMultiline, dictKeyMultiline, token), nil
+		default: // rare case: ':' as start of a dict-key
+			return token, sc.ScanInlineKey
+		}
 	case '[': // single-line list
 		return sc.recognizeInlineItem(inlineList, token), nil
 	case '{': // single-line dictionary
@@ -156,15 +174,34 @@ func (sc *scanner) ScanItemBody(token *parserToken) (*parserToken, scannerStep) 
 // ScanInlineKey is a step function to recognize an inline key, optionally followed by an inline
 // value.
 func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep) {
-	switch sc.Buf.Lookahead { // consume characters; stop on ':' or EOL
+	switch sc.Buf.Lookahead { // consume characters; stop on ': ', ':\n' or EOL
 	case ':':
-		// remove trailing whitespace from key (=> Content[0])
-		key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-1]
-		token.Content = append(token.Content, strings.TrimSpace(key))
-		token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
+		//fmt.Printf("@ LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)
+		sc.Buf.match(singleRune(':'))
+		//fmt.Printf("LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)
+		switch sc.Buf.Lookahead {
+		case ' ': // yes, this is a valid dict-key tag
+			//fmt.Printf("LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)
+			//fmt.Println("should fork --->")
+			// remove trailing whitespace from key (=> Content[0])
+			key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-2]
+			token.Content = append(token.Content, strings.TrimSpace(key))
+			token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
+		case eolMarker: // yes, this is a valid dict-key tag
+			// remove trailing whitespace from key (=> Content[0])
+			key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-1]
+			token.Content = append(token.Content, strings.TrimSpace(key))
+			token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
+		default: // rare case: ':' inside a dict key
+			//sc.Buf.match(anything())
+			//panic(fmt.Sprintf(":: found: LA=%#U\n", sc.Buf.Lookahead))
+			return token, sc.ScanInlineKey
+		}
 	case eolMarker: // Error: premature end of line
+		key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-1]
 		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
-			"dict key item not properly terminated by ':'")
+			fmt.Sprintf("dict key item %q not properly terminated by ':'", key))
+		//fmt.Printf("LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)
 	default: // recognize everything as either part of the key or trailing whitespace
 		sc.Buf.match(anything())
 		return token, sc.ScanInlineKey
@@ -172,17 +209,22 @@ func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep)
 	return token, nil
 }
 
+// recognizeItemTag continues after a valid item tag has been discovered. It will
+// match the second character of the tag (either a space or a newline) and,
+// depending on this character, select the continuation call.
+//
 func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, token *parserToken) *parserToken {
-	sc.Buf.match(singleRune(tag))
+	//fmt.Printf("forked: LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)
+	// sc.Buf.match(singleRune(tag)) // changed: now already match by calling party
+	if sc.Buf.Lookahead != ' ' && sc.Buf.Lookahead != eolMarker {
+		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
+			fmt.Sprintf("item tag %q followed by illegal character %#U", tag, sc.Buf.Lookahead))
+		return token
+	}
 	if sc.Buf.Lookahead == ' ' {
 		sc.Buf.match(singleRune(' '))
 		token.TokenType = single
 		token.Content = append(token.Content, sc.Buf.ReadLineRemainder())
-		return token
-	}
-	if sc.Buf.Lookahead != eolMarker {
-		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
-			fmt.Sprintf("item tag %q followed by illegal character %#U", tag, sc.Buf.Lookahead))
 		return token
 	}
 	sc.Buf.match(singleRune(eolMarker))
@@ -191,7 +233,9 @@ func (sc *scanner) recognizeItemTag(tag rune, single, multi parserTokenType, tok
 }
 
 func (sc *scanner) recognizeInlineItem(toktype parserTokenType, token *parserToken) *parserToken {
-	closing := sc.Buf.Text[len(sc.Buf.Text)-1]
+	trimmed := strings.TrimSpace(sc.Buf.Text)
+	closing := trimmed[len(trimmed)-1]
+	//closing := sc.Buf.Text[len(sc.Buf.Text)-1]
 	if !isMatchingBracket(sc.Buf.Lookahead, rune(closing)) {
 		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
 			fmt.Sprintf("inline-item does not match opening tag: %#U vs %#U",
