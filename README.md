@@ -77,7 +77,6 @@ fmt.Printf("%d bytes written, error: %v", n, err != nil)
 
 will yield:
 
-    Output:
     ports:
       - 6483
       - 8020
