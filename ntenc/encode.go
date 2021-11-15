@@ -168,11 +168,18 @@ func (enc *encoder) encodeReflected(indent int, tree interface{}, w io.Writer, b
 			}
 		}
 	case reflect.Map:
-		// first sort items alphabetically by key
 		keys := v.MapKeys()
+		// special case: empty map
+		if len(keys) == 0 {
+			return wr(w, bcnt, err, []byte("{}\n"))
+		}
+		// first sort items alphabetically by key
 		sort.Slice(keys, func(i, j int) bool {
 			return keys[i].String() < keys[j].String()
 		})
+		// for i, k := range keys {
+		// 	fmt.Printf("@@@ [%d] keys = %#v\n", i, k.String())
+		// }
 		for _, k := range keys {
 			if k.Kind() != reflect.String {
 				return 0, nestext.MakeNestedTextError(nestext.ErrCodeSchema,
@@ -190,17 +197,23 @@ func (enc *encoder) encodeReflected(indent int, tree interface{}, w io.Writer, b
 					bcnt, err = wr(w, bcnt, err, []byte{'\n'})
 				} else {
 					bcnt, err = wr(w, bcnt, err, []byte{'\n'})
-					bcnt, err = enc.encode(indent+1, item, w, bcnt, err)
+					bcnt, err = encodeIfNotEmpty(enc, item, w, indent, bcnt, err)
+					//bcnt, err = enc.encode(indent+1, item, w, bcnt, err)
 				}
 			} else { // output key as a multi-line key
 				S := strings.Split(key, "\n")
 				for _, s := range S {
 					bcnt, err = enc.indent(w, bcnt, err, indent)
-					bcnt, err = wr(w, bcnt, err, []byte(": "))
-					bcnt, err = wr(w, bcnt, err, []byte(s))
+					if s == "" {
+						bcnt, err = wr(w, bcnt, err, []byte(":"))
+					} else {
+						bcnt, err = wr(w, bcnt, err, []byte(": "))
+						bcnt, err = wr(w, bcnt, err, []byte(s))
+					}
 					bcnt, err = wr(w, bcnt, err, []byte{'\n'})
 				}
-				bcnt, err = enc.encode(indent+1, item, w, bcnt, err)
+				bcnt, err = encodeIfNotEmpty(enc, item, w, indent, bcnt, err)
+				//bcnt, err = enc.encode(indent+1, item, w, bcnt, err)
 			}
 		}
 	default:
@@ -208,6 +221,18 @@ func (enc *encoder) encodeReflected(indent int, tree interface{}, w io.Writer, b
 			fmt.Sprintf("unable to encode type %T", tree))
 	}
 	return bcnt, err
+}
+
+func encodeIfNotEmpty(enc *encoder, item interface{}, w io.Writer, indent, bcnt int, err error) (int, error) {
+	if err != nil {
+		return bcnt, err
+	}
+	if s, ok := item.(string); ok {
+		if s == "" {
+			return bcnt, err
+		}
+	}
+	return enc.encode(indent+1, item, w, bcnt, err)
 }
 
 func isEncodable(item interface{}) bool {
@@ -242,6 +267,9 @@ func isInlineable(what int, item interface{}) (bool, []byte) {
 	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.Struct:
 		return false, nil
 	case reflect.String:
+		if item.(string) == "" {
+			return false, nil
+		}
 		if strings.ContainsAny(item.(string), itemPattern[what]) {
 			return false, nil
 		}

@@ -15,6 +15,14 @@ import (
 	"github.com/npillmayer/nestext/ntenc"
 )
 
+// Decding-tests are checked via string comparison of the "%#v"-output. This seems
+// to be a stable method.
+//
+// Ending-tests are trickier, as for many structures there are more than one correct
+// NT representations. Moreover, stability of map elements is a challenge: we sort
+// them alphabetically, as Go does not make any guarantees about the sequence.
+// All in all we are currently not testing this 100% correctly.
+
 var suitePath = filepath.Join(".", "official_tests", "test_cases")
 
 func casePath(c *ntTestCase) string {
@@ -77,9 +85,7 @@ func ttype(name string) string {
 }
 
 var skipped = []string{
-	"dict_17",
-	"inline_dict_01",
-	//"string_9",
+	//"inline_dict_01",
 }
 
 func contains(l []string, s string) bool {
@@ -93,7 +99,7 @@ func contains(l []string, s string) bool {
 
 func TestAll(t *testing.T) {
 	cases := listTestCases(t)
-	min, max := 0, 102
+	min, max := 0, len(cases)-1
 	for i, c := range cases[min : max+1] {
 		if strings.HasPrefix(c.name, ".") {
 			cases[min+i].status = "-"
@@ -107,7 +113,7 @@ func TestAll(t *testing.T) {
 	}
 	failcnt := 0
 	for i, c := range cases[min : max+1] {
-		t.Logf("test (%03d) %-21q: %10s  [ %-7s , %-7s ]", min+i, c.name, c.status, c.statusD, c.statusE)
+		t.Logf("test (%03d) %-21q: %10s  [ %-5s , %-5s ]", min+i, c.name, c.status, c.statusD, c.statusE)
 		if c.isFail {
 			failcnt++
 		}
@@ -117,7 +123,6 @@ func TestAll(t *testing.T) {
 
 func runTestCase(c *ntTestCase, t *testing.T) {
 	if err := loadTestCase(c, t); err != nil {
-		c.status = fmt.Sprintf("error: %s", err.Error())
 		c.isFail = true
 		t.Errorf("cannot open %q, skipping", c.name)
 	}
@@ -131,7 +136,7 @@ func loadTestCase(c *ntTestCase, t *testing.T) (err error) {
 	}
 	c.status = "located"
 	c.data = make(map[string][]byte)
-	t.Logf("case.name = %q, %d files", c.name, len(c.files))
+	//t.Logf("case.name = %q, %d files", c.name, len(c.files))
 	for _, fname := range []string{
 		"load_in.nt", "load_out.json", "load_err.json",
 		"dump_in.json", "dump_out.nt", "dump_err.json",
@@ -151,11 +156,10 @@ func loadTestCase(c *ntTestCase, t *testing.T) (err error) {
 }
 
 func testDecodeCase(c *ntTestCase, t *testing.T) {
-	t.Logf("decoding-test %q", c.name)
+	//t.Logf("decoding-test %q", c.name)
 	if c.isLoad {
 		b := c.data["load_in.nt"]
 		nt, err := nestext.Parse(strings.NewReader(string(b)))
-		t.Logf("done")
 		if err != nil {
 			if c.contains("load_err.json") {
 				c.statusD = "ok"
@@ -173,7 +177,7 @@ func testDecodeCase(c *ntTestCase, t *testing.T) {
 }
 
 func testEncodeCase(c *ntTestCase, t *testing.T) {
-	t.Logf("encoding-test %q", c.name)
+	//t.Logf("encoding-test %q", c.name)
 	if c.isDump {
 		b := c.data["dump_in.json"]
 		var r interface{}
@@ -190,7 +194,7 @@ func testEncodeCase(c *ntTestCase, t *testing.T) {
 			return
 		}
 		buf := &bytes.Buffer{}
-		_, err := ntenc.Encode(r, buf)
+		_, err := ntenc.Encode(r, buf, ntenc.IndentBy(4))
 		if err != nil {
 			if c.contains("dump_err.json") {
 				c.statusE = "ok"
@@ -203,6 +207,8 @@ func testEncodeCase(c *ntTestCase, t *testing.T) {
 		c.statusE = "parsed"
 		if compareJson(buf, c, t) {
 			c.statusE = "ok"
+		} else {
+			c.statusE = "?"
 		}
 	}
 }
@@ -232,6 +238,17 @@ func compareOutput(any interface{}, c *ntTestCase, t *testing.T) bool {
 }
 
 func compareJson(buf *bytes.Buffer, c *ntTestCase, t *testing.T) bool {
+	// kill excessive newlines at end
+	n := strings.TrimRight(string(c.data["dump_out.nt"]), "\n")
+	m := strings.TrimRight(buf.String(), "\n")
+	if n != m {
+		// t.Logf("target NT:\n%q\n\n", n+"\n")
+		// t.Logf("output NT:\n%q\n\n", m+"\n")
+		// b := c.data["dump_in.json"]
+		// t.Logf("input JSON:\n\n%s\n", string(b))
+		// t.Logf("NT output does not match target")
+		return false
+	}
 	return true
 }
 

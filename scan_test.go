@@ -77,6 +77,21 @@ func TestScannerTopLevelIndent(t *testing.T) {
 	}
 }
 
+func TestScannerUTF8(t *testing.T) {
+	r := strings.NewReader("$€¥£₩₺₽₹ɃΞȄ: $€¥£₩₺₽₹ɃΞȄ")
+	sc, err := newScanner(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var token *parserToken
+	_ = sc.NextToken() // doc root
+	token = sc.NextToken()
+	logToken(token, t)
+	if token.Content == nil || token.Content[0] != "$€¥£₩₺₽₹ɃΞȄ" {
+		t.Fatalf("UTF-8 decoding problem?")
+	}
+}
+
 func TestScannerTerminate(t *testing.T) {
 	r := strings.NewReader("> This is a string\n> and this too\n?    ")
 	sc, err := newScanner(r)

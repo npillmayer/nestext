@@ -31,10 +31,12 @@ func TestInlineParseItemsTable(t *testing.T) {
 		output  string
 	}{
 		{"[]", _S2, "[]"},
+		{"[ ]", _S2, "[]"},
 		{"[x]", _S2, "[x]"},
 		{"[x,y]", _S2, "[x y]"},
 		{"[[]]", _S2, "[[]]"},
 		{"{}", _S1, "map[]"},
+		{"{:}", _S1, "map[:]"},
 		{"{a:x}", _S1, "map[a:x]"},
 		{"{a: [x]}", _S1, "map[a:[x]]"},
 		{"{a:[x,y] }", _S1, "map[a:[x y]]"},

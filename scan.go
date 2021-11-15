@@ -184,12 +184,12 @@ func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep)
 			//fmt.Printf("LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)
 			//fmt.Println("should fork --->")
 			// remove trailing whitespace from key (=> Content[0])
-			key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-2]
+			key := sc.Buf.Text[token.Indent : sc.Buf.ByteCursor-2]
 			token.Content = append(token.Content, strings.TrimSpace(key))
 			token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
 		case eolMarker: // yes, this is a valid dict-key tag
 			// remove trailing whitespace from key (=> Content[0])
-			key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-1]
+			key := sc.Buf.Text[token.Indent : sc.Buf.ByteCursor-1]
 			token.Content = append(token.Content, strings.TrimSpace(key))
 			token = sc.recognizeItemTag(':', inlineDictKeyValue, inlineDictKey, token)
 		default: // rare case: ':' inside a dict key
@@ -198,7 +198,7 @@ func (sc *scanner) ScanInlineKey(token *parserToken) (*parserToken, scannerStep)
 			return token, sc.ScanInlineKey
 		}
 	case eolMarker: // Error: premature end of line
-		key := sc.Buf.Text[token.Indent : sc.Buf.Cursor-1]
+		key := sc.Buf.Text[token.Indent : sc.Buf.ByteCursor-1]
 		token.Error = makeParsingError(token, ErrCodeFormatIllegalTag,
 			fmt.Sprintf("dict key item %q not properly terminated by ':'", key))
 		//fmt.Printf("LA = %#U, line = %q, at %d\n", sc.Buf.Lookahead, sc.Buf.Text, sc.Buf.Cursor)

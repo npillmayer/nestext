@@ -120,23 +120,17 @@ func (p *nestedTextParser) Parse(r io.Reader) (result interface{}, err error) {
 
 func (p *nestedTextParser) parseDocument() (result interface{}, err error) {
 	// initial token from scanner is a health check for the input source
-	//fmt.Println("# requesting document root from scanner")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
-	//fmt.Printf("# document root = %s\n", p.token)
 	if p.token.TokenType == eof || p.token.TokenType == emptyDocument {
 		return nil, nil
 	}
 	// read the first item line
-	//fmt.Println("# parsers starts requesting lines")
 	if p.token = p.sc.NextToken(); p.token.Error != nil {
 		return nil, p.token.Error
 	}
 	result, err = p.parseAny(0)
-	//fmt.Printf("RESULT:\n%v\n", result)
-	//fmt.Printf("final token = %s\n", p.token)
-	//fmt.Printf("final line = %d\n", p.sc.Buf.CurrentLine)
 	if err == nil && p.token.TokenType != eof { // TODO this test is not sufficient
 		err = makeParsingError(p.token, ErrCodeFormat,
 			"unused content following valid input")
@@ -145,9 +139,7 @@ func (p *nestedTextParser) parseDocument() (result interface{}, err error) {
 }
 
 func (p *nestedTextParser) parseAny(indent int) (result interface{}, err error) {
-	//fmt.Printf("# parseAny(%d)\n", indent)
 	if p.token.Indent < indent {
-		//fmt.Println("# <-outdent")
 		return nil, nil
 	}
 	switch p.token.TokenType {
@@ -725,8 +717,13 @@ func (p *inlineItemParser) appendStringValue(isAccept bool) {
 	// multiple values, no white space is required to represent an empty string
 	// Thus, [] represents an empty list, [ ] a list with a single empty string value,
 	// and [,] a list with two empty string values.
-	if !isAccept || len(value) > 0 || len(p.stack.tos().Values) > 0 {
+	if p.stack.tos().Key != nil {
 		value = strings.TrimSpace(value)
+		//fmt.Printf("appending dict value: %q\n", value)
+		p.stack.pushKV(p.stack.tos().Key, value)
+	} else if !isAccept || len(value) > 0 || len(p.stack.tos().Values) > 0 {
+		value = strings.TrimSpace(value)
+		//fmt.Printf("appending list value: %q\n", value)
 		p.stack.pushKV(p.stack.tos().Key, value)
 	}
 }
