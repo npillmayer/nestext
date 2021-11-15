@@ -9,7 +9,34 @@ A description of NestedText by the authors:
 > YAML and TOML, but without the complexity and risk of YAML and without the syntactic clutter of
 > JSON and TOML. NestedText is both simple and natural.
 
-### Decoding
+To get a feel for the NestedText format, take a look at the following example
+(shortended version from the NestedText site):
+
+```
+# Contact information for our officers
+
+president:
+    name: Katheryn McDaniel
+    address:
+        > 138 Almond Street
+        > Topeka, Kansas 20697
+    phone:
+        cell: 1-210-555-5297
+        home: 1-210-555-8470
+        # Katheryn prefers that we always call her on her cell phone.
+    email: KateMcD@aol.com
+    additional roles:
+        - board member
+
+vice president:
+    name: Margaret Hodge
+    …
+```
+
+NestedText does not interpret any data types (unlike YAML), nor does it impose a schema.
+All of that has to be done by the application.
+
+## Decoding
 
 `Parse(…)` is the top-level API:
    
@@ -33,7 +60,7 @@ will yield:
 
 Clients may use tools like `mitchellh/mapstructure` or `knadh/koanf` for further processing.
 
-### Encoding
+## Encoding
 
 Sub-package `ntenc` provides an encoder-API:
 
