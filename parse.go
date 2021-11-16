@@ -39,9 +39,9 @@ type _Option func(*nestedTextParser) error // internal synonym to hide unterlyin
 // type map[string]interface.
 //
 // For "dict", if the result is not a dict naturally, it will be wrapped in a map with a single
-// key = "dict". However, if the dict-option is given with a suffix (separated by '.'), the suffix
-// string will be used as the top-level key. In this case, even naturally parsed dicts will be
-// wrapped into a map with a single key (= the suffix to "dict.").
+// key = "nestedtext". However, if the dict-option is given with a suffix (separated by '.'), the
+// suffix string will be used as the top-level key. In this case, even naturally parsed dicts will
+// be wrapped into a map with a single key (= the suffix to "dict.").
 //
 // Use as:
 //     nestext.Parse(reader, nestext.TopLevel("dict.config"))
@@ -384,7 +384,7 @@ func (p *nestedTextParser) wrapResult(result interface{}) interface{} {
 		v := reflect.ValueOf(result)
 		if v.Kind() != reflect.Map {
 			result = map[string]interface{}{
-				"dict": result,
+				"nestedtext": result,
 			}
 		}
 	default:

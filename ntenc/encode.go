@@ -2,8 +2,9 @@
 // Configuration data is a tree of map[string]interface{}, []interface{} and strings.
 // It may not contain structs, channels nor unsafe types.
 //
-// This package is the counterpart to the NestedText parser, located in the base package
-// of module `nestext`.
+// This package is the counterpart to the NestedText parser (located in the base package
+// of module `nestext`).
+//
 package ntenc
 
 import (
@@ -149,6 +150,10 @@ func (enc *encoder) encode(indent int, tree interface{}, w io.Writer, bcnt int, 
 	return bcnt, err
 }
 
+// encodeReflected encodes container types slice and map. As the name suggests,
+// we use reflection to get detailled type information.
+// The code here is not difficult in structure, but rather simply tedious for all the
+// special cases.
 func (enc *encoder) encodeReflected(indent int, tree interface{}, w io.Writer, bcnt int, err error) (int, error) {
 	v := reflect.ValueOf(tree)
 	switch v.Kind() {
